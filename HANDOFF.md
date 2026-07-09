@@ -62,7 +62,7 @@ Memory index for this project lives at
 Prereqs: Docker Desktop, Node 22, git.
 
 ```bash
-git clone <gitlab-url> card-scan-app
+git clone git@github.com:mxcoop98/card-scan-app.git
 cd card-scan-app
 
 # --- Backend ---
