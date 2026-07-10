@@ -1,8 +1,9 @@
 import { Stack, router } from 'expo-router';
 import { useState } from 'react';
-import { Pressable, StyleSheet, TextInput } from 'react-native';
+import { Pressable, StyleSheet, type TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -97,12 +98,7 @@ function Field(props: React.ComponentProps<typeof TextInput> & { label: string }
   return (
     <ThemedView style={{ gap: 4, backgroundColor: 'transparent' }}>
       <ThemedText type="small">{label}</ThemedText>
-      <TextInput
-        {...rest}
-        placeholderTextColor="#888"
-        style={styles.input}
-        autoCapitalize={rest.autoCapitalize ?? 'none'}
-      />
+      <ThemedInput {...rest} />
     </ThemedView>
   );
 }
@@ -119,15 +115,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(127,127,127,0.4)',
   },
   pillActive: { borderColor: '#4a9eff', backgroundColor: 'rgba(74,158,255,0.15)' },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    fontSize: 16,
-    color: 'white',
-  },
+  input: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, fontSize: 16 },
   submit: {
     marginTop: Spacing.three,
     padding: Spacing.three,

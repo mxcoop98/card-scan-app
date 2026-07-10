@@ -1,8 +1,9 @@
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
@@ -137,12 +138,11 @@ function ParamInput({ label, value, onChangeText }: { label: string; value: stri
   return (
     <ThemedView style={{ flex: 1, minWidth: 90, gap: 4, backgroundColor: 'transparent' }}>
       <ThemedText type="small">{label}</ThemedText>
-      <TextInput
+      <ThemedInput
         value={value}
         onChangeText={onChangeText}
         keyboardType="decimal-pad"
         style={styles.input}
-        placeholderTextColor="#888"
       />
     </ThemedView>
   );
@@ -154,13 +154,9 @@ const styles = StyleSheet.create({
   card: { padding: Spacing.three, borderRadius: Spacing.three, gap: Spacing.two },
   paramRow: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two, backgroundColor: 'transparent' },
   input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: Spacing.two,
     paddingHorizontal: Spacing.two,
     paddingVertical: 6,
     fontSize: 14,
-    color: 'white',
   },
   button: {
     padding: Spacing.two,

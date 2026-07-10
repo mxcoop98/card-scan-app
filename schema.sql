@@ -94,6 +94,32 @@ CREATE INDEX IF NOT EXISTS idx_listing_cards_card ON listing_cards(card_id);
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS cost_basis NUMERIC(12,2);
 
 -- ============================================================
+-- eBay integration: one row per environment (sandbox / production)
+-- since a seller may connect both. Tokens auto-refresh via the
+-- refresh_token; when refresh_token itself expires (18mo), user
+-- must re-authorize.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ebay_tokens (
+    environment       TEXT PRIMARY KEY,       -- 'sandbox' | 'production'
+    access_token      TEXT NOT NULL,
+    refresh_token     TEXT NOT NULL,
+    access_expires_at TIMESTAMPTZ NOT NULL,
+    refresh_expires_at TIMESTAMPTZ,
+    seller_username   TEXT,
+    scopes            TEXT,
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Track eBay-specific state on listings that we've pushed there.
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_environment TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_sku         TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_offer_id    TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_listing_id  TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_view_url    TEXT;
+ALTER TABLE listings ADD COLUMN IF NOT EXISTS ebay_last_synced_at TIMESTAMPTZ;
+
+-- ============================================================
 -- Grading worthiness: three tables that plug into a shared ROI
 -- engine. Data comes from the user for v1; PSA API can populate
 -- graded_price_estimates later as source='psa_api' without any

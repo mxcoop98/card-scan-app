@@ -1,0 +1,274 @@
+// ============================================================
+// eBay Sell API integration.
+//
+// OAuth 2.0 (authorization code grant), then a thin wrapper around
+// the Sell / Inventory / Fulfillment APIs.
+//
+// Everything reads config from env: EBAY_ENV, EBAY_CLIENT_ID,
+// EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI, EBAY_SCOPES. Tokens live
+// in the ebay_tokens table keyed by environment.
+// ============================================================
+
+import { query } from './db.js';
+
+const HOSTS = {
+  sandbox: {
+    auth: 'https://auth.sandbox.ebay.com/oauth2/authorize',
+    token: 'https://api.sandbox.ebay.com/identity/v1/oauth2/token',
+    api: 'https://api.sandbox.ebay.com',
+    listing_prefix: 'https://sandbox.ebay.com/itm/',
+  },
+  production: {
+    auth: 'https://auth.ebay.com/oauth2/authorize',
+    token: 'https://api.ebay.com/identity/v1/oauth2/token',
+    api: 'https://api.ebay.com',
+    listing_prefix: 'https://www.ebay.com/itm/',
+  },
+};
+
+function env() {
+  return (process.env.EBAY_ENV || 'sandbox').toLowerCase();
+}
+function hosts() {
+  const h = HOSTS[env()];
+  if (!h) throw new Error(`Unknown EBAY_ENV: ${env()}`);
+  return h;
+}
+function scopes() {
+  return (process.env.EBAY_SCOPES || 'https://api.ebay.com/oauth/api_scope').trim();
+}
+function requireCreds() {
+  const id = process.env.EBAY_CLIENT_ID;
+  const secret = process.env.EBAY_CLIENT_SECRET;
+  const redirect = process.env.EBAY_REDIRECT_URI;
+  if (!id || !secret || !redirect) {
+    throw new Error('EBAY_CLIENT_ID, EBAY_CLIENT_SECRET, EBAY_REDIRECT_URI must be set in .env');
+  }
+  // eBay's OAuth 2.0 uses the RuName as the `redirect_uri` parameter in
+  // both authorize and token endpoints — NOT the actual URL. If the user
+  // has set EBAY_RUNAME we use it; if not, we fall back to the URL for
+  // apps configured that way.
+  const runame = process.env.EBAY_RUNAME || redirect;
+  return { id, secret, redirect, runame };
+}
+
+// ---------- OAuth ----------
+
+// Build the URL the user is redirected to for consent.
+export function authorizeUrl(state) {
+  const { id, runame } = requireCreds();
+  const params = new URLSearchParams({
+    client_id: id,
+    response_type: 'code',
+    redirect_uri: runame,
+    scope: scopes(),
+    state: state ?? '',
+  });
+  return `${hosts().auth}?${params.toString()}`;
+}
+
+// Exchange authorization code for tokens. Persists them.
+export async function exchangeCode(code) {
+  const { id, secret, runame } = requireCreds();
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: runame,
+  });
+  const res = await fetch(hosts().token, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  if (!res.ok) throw new Error(`token exchange ${res.status}: ${await res.text()}`);
+  const t = await res.json();
+  await persistTokens(t);
+  return t;
+}
+
+// Get a valid access token, refreshing if expired.
+export async function accessToken() {
+  const row = await currentTokens();
+  if (!row) throw new Error('eBay not connected — POST /api/ebay/authorize-url first');
+  const now = Date.now();
+  const expires = new Date(row.access_expires_at).getTime();
+  if (now < expires - 60_000) return row.access_token;
+  return refreshAccessToken(row);
+}
+
+async function refreshAccessToken(row) {
+  const { id, secret } = requireCreds();
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    refresh_token: row.refresh_token,
+    scope: scopes(),
+  });
+  const res = await fetch(hosts().token, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${id}:${secret}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  });
+  if (!res.ok) throw new Error(`token refresh ${res.status}: ${await res.text()}`);
+  const t = await res.json();
+  await persistTokens({ ...t, refresh_token: row.refresh_token });
+  return t.access_token;
+}
+
+async function persistTokens(t) {
+  const accessExpiresAt = new Date(Date.now() + (t.expires_in ?? 7200) * 1000);
+  const refreshExpiresAt = t.refresh_token_expires_in
+    ? new Date(Date.now() + t.refresh_token_expires_in * 1000)
+    : null;
+  await query(
+    `INSERT INTO ebay_tokens (environment, access_token, refresh_token, access_expires_at, refresh_expires_at, scopes, updated_at)
+     VALUES ($1,$2,$3,$4,$5,$6, now())
+     ON CONFLICT (environment) DO UPDATE SET
+       access_token = EXCLUDED.access_token,
+       refresh_token = COALESCE(EXCLUDED.refresh_token, ebay_tokens.refresh_token),
+       access_expires_at = EXCLUDED.access_expires_at,
+       refresh_expires_at = COALESCE(EXCLUDED.refresh_expires_at, ebay_tokens.refresh_expires_at),
+       scopes = EXCLUDED.scopes,
+       updated_at = now()`,
+    [env(), t.access_token, t.refresh_token, accessExpiresAt, refreshExpiresAt, scopes()]
+  );
+}
+
+async function currentTokens() {
+  const { rows } = await query('SELECT * FROM ebay_tokens WHERE environment = $1', [env()]);
+  return rows[0] ?? null;
+}
+
+export async function status() {
+  const t = await currentTokens();
+  return {
+    environment: env(),
+    connected: !!t,
+    access_expires_at: t?.access_expires_at ?? null,
+    refresh_expires_at: t?.refresh_expires_at ?? null,
+    seller_username: t?.seller_username ?? null,
+    configured: !!process.env.EBAY_CLIENT_ID && !!process.env.EBAY_CLIENT_SECRET && !!process.env.EBAY_REDIRECT_URI,
+    redirect_uri: process.env.EBAY_REDIRECT_URI ?? null,
+    scopes: scopes(),
+  };
+}
+
+// ---------- Sell API helpers ----------
+
+async function api(method, path, body) {
+  const token = await accessToken();
+  const res = await fetch(`${hosts().api}${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'Content-Language': 'en-US',
+      Accept: 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  if (!res.ok) throw new Error(`ebay ${method} ${path} → ${res.status}: ${text}`);
+  return text ? JSON.parse(text) : null;
+}
+
+// Publish a listing derived from a Card Tracker listing row + its cards.
+// Very v1: single-card listings only. Multi-card lots come later.
+export async function publishListing({ listing, cards }) {
+  if (!listing) throw new Error('listing required');
+  if (cards.length !== 1) throw new Error('multi-card lots not yet supported for eBay');
+  const card = cards[0];
+
+  const sku = `ct-${listing.id}`;
+  const askPrice = listing.ask_price ? Number(listing.ask_price).toFixed(2) : null;
+  if (!askPrice) throw new Error('listing.ask_price is required to publish');
+
+  // 1. Create/update the inventory item
+  await api('PUT', `/sell/inventory/v1/inventory_item/${sku}`, {
+    availability: {
+      shipToLocationAvailability: { quantity: 1 },
+    },
+    condition: card.grader ? 'LIKE_NEW' : 'USED_EXCELLENT', // TODO: real grade→condition map
+    product: {
+      title: buildTitle(listing, card),
+      description: buildDescription(listing, card),
+      aspects: buildAspects(card),
+      imageUrls: card.image_url ? [card.image_url] : [],
+    },
+  });
+
+  // 2. Create an offer for the item
+  const offer = await api('POST', `/sell/inventory/v1/offer`, {
+    sku,
+    marketplaceId: 'EBAY_US',
+    format: 'FIXED_PRICE',
+    availableQuantity: 1,
+    categoryId: card.category === 'pokemon' ? '183454' : '213', // Pokemon TCG Individual Cards / Sports Trading Cards
+    pricingSummary: { price: { value: askPrice, currency: 'USD' } },
+    listingPolicies: {
+      // These IDs must come from the seller's Account API. Placeholder
+      // for now — will error at publish time until the user fills these in.
+      fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID ?? '',
+      paymentPolicyId:     process.env.EBAY_PAYMENT_POLICY_ID     ?? '',
+      returnPolicyId:      process.env.EBAY_RETURN_POLICY_ID      ?? '',
+    },
+    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY ?? 'default',
+  });
+
+  // 3. Publish the offer → get eBay listing id
+  const published = await api('POST', `/sell/inventory/v1/offer/${offer.offerId}/publish`, {});
+  const listingId = published.listingId;
+  const viewUrl = listingId ? `${hosts().listing_prefix}${listingId}` : null;
+
+  await query(
+    `UPDATE listings SET
+       ebay_environment = $1,
+       ebay_sku = $2,
+       ebay_offer_id = $3,
+       ebay_listing_id = $4,
+       ebay_view_url = $5,
+       ebay_last_synced_at = now(),
+       external_listing_id = COALESCE(external_listing_id, $4),
+       status = 'active',
+       updated_at = now()
+     WHERE id = $6`,
+    [env(), sku, offer.offerId, listingId, viewUrl, listing.id]
+  );
+
+  return { sku, offerId: offer.offerId, listingId, viewUrl };
+}
+
+function buildTitle(_listing, card) {
+  const parts = [card.year, card.set_name, card.name, card.card_number, card.grader && `${card.grader} ${card.grade}`]
+    .filter(Boolean);
+  // eBay title limit is 80 characters.
+  return parts.join(' ').slice(0, 80);
+}
+
+function buildDescription(listing, card) {
+  return [
+    `<h2>${card.name}</h2>`,
+    card.set_name && `<p><b>Set:</b> ${card.set_name}</p>`,
+    card.card_number && `<p><b>Card #:</b> ${card.card_number}</p>`,
+    card.year && `<p><b>Year:</b> ${card.year}</p>`,
+    card.grader && `<p><b>Grade:</b> ${card.grader} ${card.grade ?? ''}</p>`,
+    listing.notes && `<p>${listing.notes}</p>`,
+    `<p>Listed via Card Tracker.</p>`,
+  ].filter(Boolean).join('');
+}
+
+function buildAspects(card) {
+  const a = {};
+  if (card.year)      a['Year Manufactured'] = [String(card.year)];
+  if (card.set_name)  a['Set'] = [card.set_name];
+  if (card.name)      a['Character']  = [card.name];
+  if (card.card_number) a['Card Number'] = [String(card.card_number)];
+  if (card.grader)    a['Professional Grader'] = [card.grader];
+  if (card.grade)     a['Grade'] = [String(card.grade)];
+  return a;
+}

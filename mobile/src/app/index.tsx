@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -66,11 +67,10 @@ export default function CardsScreen() {
           </Pressable>
         </ThemedView>
 
-        <TextInput
+        <ThemedInput
           value={search}
           onChangeText={setSearch}
           placeholder="Search cards…"
-          placeholderTextColor="#888"
           style={styles.search}
         />
 
@@ -155,13 +155,7 @@ const styles = StyleSheet.create({
   search: {
     marginHorizontal: Spacing.four,
     marginBottom: Spacing.two,
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
     fontSize: 15,
-    color: 'white',
   },
   tile: {
     borderRadius: Spacing.three,

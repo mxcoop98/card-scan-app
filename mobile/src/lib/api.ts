@@ -91,6 +91,12 @@ export type Listing = {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  ebay_environment: string | null;
+  ebay_sku: string | null;
+  ebay_offer_id: string | null;
+  ebay_listing_id: string | null;
+  ebay_view_url: string | null;
+  ebay_last_synced_at: string | null;
   cards: {
     id: string;
     name: string;
@@ -183,6 +189,19 @@ export type ScanCandidate = {
   image_url: string | null;
   confidence: number;
   source: string;
+};
+
+export type Variant = {
+  category: 'pokemon' | 'sports';
+  name: string;
+  set_name: string | null;
+  set_series: string | null;
+  card_number: string | null;
+  rarity: string | null;
+  year: number | null;
+  external_ids: Record<string, string>;
+  image_url: string | null;
+  market_price: number | null;
 };
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -288,4 +307,30 @@ export const api = {
     hints?: { name?: string; set_name?: string; card_number?: string };
     image?: string;
   }) => req<{ candidates: ScanCandidate[] }>('/api/scan', { method: 'POST', body: JSON.stringify(body) }),
+  variants: (params: {
+    category: 'pokemon' | 'sports';
+    name: string;
+    set_name?: string;
+    card_number?: string;
+  }) => req<{ variants: Variant[]; note?: string }>(`/api/variants${qs(params)}`),
+
+  // eBay
+  ebayStatus: () => req<EbayStatus>('/api/ebay/status'),
+  ebayAuthorizeUrl: (state?: string) => req<{ url: string }>(`/api/ebay/authorize-url${qs({ state })}`),
+  publishToEbay: (listingId: string) =>
+    req<{ sku: string; offerId: string; listingId: string; viewUrl: string }>(
+      `/api/listings/${listingId}/publish-ebay`,
+      { method: 'POST' }
+    ),
+};
+
+export type EbayStatus = {
+  environment: 'sandbox' | 'production';
+  connected: boolean;
+  access_expires_at: string | null;
+  refresh_expires_at: string | null;
+  seller_username: string | null;
+  configured: boolean;
+  redirect_uri: string | null;
+  scopes: string;
 };

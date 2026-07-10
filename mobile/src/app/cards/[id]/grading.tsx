@@ -1,8 +1,9 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -247,12 +248,11 @@ function ParamInput({ label, value, onChangeText }: { label: string; value: stri
   return (
     <ThemedView style={{ flex: 1, minWidth: 80, gap: 4, backgroundColor: 'transparent' }}>
       <ThemedText type="small">{label}</ThemedText>
-      <TextInput
+      <ThemedInput
         value={value}
         onChangeText={onChangeText}
         keyboardType="decimal-pad"
         style={styles.input}
-        placeholderTextColor="#888"
       />
     </ThemedView>
   );
@@ -284,15 +284,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999 },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: Spacing.two,
-    paddingHorizontal: Spacing.two,
-    paddingVertical: 6,
-    fontSize: 14,
-    color: 'white',
-  },
+  input: { paddingHorizontal: Spacing.two, paddingVertical: 6, fontSize: 14 },
   button: {
     padding: Spacing.two,
     borderRadius: Spacing.three,

@@ -7,6 +7,7 @@ import { migrate } from './migrate.js';
 import { analyzeGrading } from './grading.js';
 import { suggestBundles } from './bundling.js';
 import { identifyCard } from './recognition.js';
+import * as ebay from './ebay.js';
 
 const app = express();
 app.use(cors());
@@ -506,6 +507,61 @@ app.get('/api/portfolio/summary', async (_req, res) => {
   });
 });
 
+// Variants: return every known printing/parallel for a card by name.
+// Powers the "which specific printing did you scan?" picker.
+// Query: ?category=pokemon&name=Charizard&set_name=...&card_number=...
+app.get('/api/variants', async (req, res) => {
+  const { category, name, set_name, card_number } = req.query;
+  if (!category || !name) return res.status(400).json({ error: 'category and name required' });
+
+  if (category !== 'pokemon') {
+    // Sports variant discovery requires a sports card DB we don't have yet.
+    return res.json({ variants: [], note: 'variant discovery is Pokémon-only for now' });
+  }
+
+  const q = [`name:"${name}"`];
+  if (card_number) q.push(`number:${card_number}`);
+  // Deliberately DON'T constrain by set_name here — we want all sets.
+
+  const url = `https://api.pokemontcg.io/v2/cards?q=${encodeURIComponent(q.join(' '))}&pageSize=30&orderBy=set.releaseDate`;
+  const headers = {};
+  if (process.env.POKEMONTCG_API_KEY) headers['X-Api-Key'] = process.env.POKEMONTCG_API_KEY;
+
+  try {
+    const r = await fetch(url, { headers });
+    if (!r.ok) return res.status(502).json({ error: `pokemontcg.io ${r.status}` });
+    const json = await r.json();
+    const variants = (json.data ?? []).map((c) => {
+      const tp = c.tcgplayer?.prices;
+      const finish = tp ? Object.values(tp)[0] : null;
+      return {
+        category: 'pokemon',
+        name: c.name,
+        set_name: c.set?.name ?? null,
+        set_series: c.set?.series ?? null,
+        card_number: c.number ?? null,
+        rarity: c.rarity ?? null,
+        year: c.set?.releaseDate ? new Date(c.set.releaseDate).getFullYear() : null,
+        external_ids: { pokemontcg_io: c.id },
+        image_url: c.images?.small ?? c.images?.large ?? null,
+        // Cheap price hint so the picker can show $ next to each variant.
+        market_price: finish?.market ?? finish?.mid ?? finish?.low ?? null,
+      };
+    });
+    // Highlight the set_name the user thought they had so it floats first.
+    if (set_name) {
+      variants.sort((a, b) => {
+        const aMatch = a.set_name?.toLowerCase() === String(set_name).toLowerCase() ? 0 : 1;
+        const bMatch = b.set_name?.toLowerCase() === String(set_name).toLowerCase() ? 0 : 1;
+        return aMatch - bMatch;
+      });
+    }
+    res.json({ variants });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Recognition: return candidate cards matching the given hints.
 // Body: { category, hints: {name?, set_name?, card_number?}, image? }
 // The image param is currently accepted but unused — Ximilar/Google
@@ -515,6 +571,63 @@ app.post('/api/scan', async (req, res) => {
   if (!category) return res.status(400).json({ error: 'category required' });
   const candidates = await identifyCard({ category, hints, image });
   res.json({ candidates });
+});
+
+// ============================================================
+// eBay integration
+// ============================================================
+
+// Read-only status: is the app configured, is a token stored, when
+// does it expire, which environment are we on.
+app.get('/api/ebay/status', async (_req, res) => {
+  try {
+    res.json(await ebay.status());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Returns the URL the client should redirect the user to for consent.
+app.get('/api/ebay/authorize-url', async (req, res) => {
+  try {
+    const state = req.query.state ? String(req.query.state) : undefined;
+    res.json({ url: ebay.authorizeUrl(state) });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+// eBay redirects the user's browser here with ?code=... after consent.
+// We exchange it for tokens, then bounce back to the app frontend.
+app.get('/api/ebay/callback', async (req, res) => {
+  const { code, error, error_description } = req.query;
+  if (error) return res.status(400).send(`eBay returned error: ${error} — ${error_description ?? ''}`);
+  if (!code) return res.status(400).send('missing code');
+  try {
+    await ebay.exchangeCode(String(code));
+    // Bounce the browser back to the frontend. The Expo web dev server
+    // is on 8081 in dev; in prod this will be the app's own origin.
+    const back = process.env.EBAY_POST_AUTH_REDIRECT ?? 'http://localhost:8081/settings';
+    res.redirect(back);
+  } catch (e) {
+    res.status(500).send(`token exchange failed: ${e.message}`);
+  }
+});
+
+// Publish a listing to eBay. Uses hydrated cards + listing row.
+app.post('/api/listings/:id/publish-ebay', async (req, res) => {
+  try {
+    const l = await query('SELECT * FROM listings WHERE id = $1', [req.params.id]);
+    if (!l.rows[0]) return res.status(404).json({ error: 'listing not found' });
+    const cards = await query(
+      `SELECT c.* FROM listing_cards lc JOIN cards c ON c.id = lc.card_id WHERE lc.listing_id = $1`,
+      [req.params.id]
+    );
+    const result = await ebay.publishListing({ listing: l.rows[0], cards: cards.rows });
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // Historical portfolio value: for each day we have data, sum the last

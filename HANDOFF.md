@@ -118,7 +118,47 @@ Portfolio: `GET /api/portfolio/summary`, `GET /api/portfolio/timeseries`.
 Scan: `POST /api/scan` — body `{category, hints:{name?, set_name?, card_number?}, image?}`,
 returns `{candidates: [...]}`.
 
+Variants: `GET /api/variants?category=pokemon&name=Charizard[&set_name=&card_number=]`
+returns `{variants: [...]}` — every printing across sets for the parallel picker.
+
+eBay: `GET /api/ebay/status`, `GET /api/ebay/authorize-url`,
+`GET /api/ebay/callback` (redirect target, exchanges auth code for tokens),
+`POST /api/listings/:id/publish-ebay` (v1: single-card only).
+
 Health: `GET /health`.
+
+## eBay integration setup
+
+**Blocked on: eBay Developer Program approval** (~24h after signup).
+
+Once approved:
+
+1. In eBay Developer Console → create an app, get the **Sandbox** keyset
+   (App ID / Cert ID / RuName). Add these to backend `.env`:
+   ```
+   EBAY_ENV=sandbox
+   EBAY_CLIENT_ID=<App ID>
+   EBAY_CLIENT_SECRET=<Cert ID>
+   EBAY_REDIRECT_URI=http://localhost:3000/api/ebay/callback
+   ```
+2. In Developer Console → your app → User Tokens → set your Auth Accepted URL to the
+   same `http://localhost:3000/api/ebay/callback`.
+3. Restart the backend (`node src/server.js`).
+4. Open the app → Portfolio → "Settings & integrations ›" → "Connect eBay". Sign in
+   with a **sandbox test user** (create one at developer.ebay.com → Sandbox → Test users).
+5. Back in the app, "Connected: Yes" should show. Access token expires in 2 hours,
+   refresh token in 18 months; refresh is automatic.
+6. On a draft listing (single card, ask_price set) → "Publish to eBay". If it succeeds
+   the listing detail page shows an "Open in eBay" link to the sandbox listing.
+
+If publish fails, the most common reasons are missing seller policies. Get the IDs
+from the eBay Sell Account API and add to `.env`:
+```
+EBAY_FULFILLMENT_POLICY_ID=
+EBAY_PAYMENT_POLICY_ID=
+EBAY_RETURN_POLICY_ID=
+EBAY_MERCHANT_LOCATION_KEY=default
+```
 
 ## What's built vs not
 
@@ -134,14 +174,17 @@ Health: `GET /health`.
 **Not built (roadmap):**
 1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is hint search.
    Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider when we're ready to pay.
-2. **eBay integration** — listings table + mark-sold endpoint are ready to receive real
-   eBay order data. Need OAuth + Sell API push + order webhook.
+2. **eBay integration — v1 shipped 2026-07-09** (OAuth, publish single-card, view URL).
+   Still todo: multi-card lot listings, seller policy discovery, order polling for auto
+   mark-sold, real category/aspect mapping, production-mode HTTPS setup.
 3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings, Card Ladder,
    SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate one — present tradeoffs.
-4. **PSA API for grading** — auto-populate graded price estimates + Pop Report probabilities.
-5. **Front + back card images**, **grade pill selector** (RAW/PSA/BGS/SGC filters comps),
+4. **Sports variant discovery** — the `/api/variants` endpoint returns empty for sports
+   because we don't have a sports card DB. Same fix as sports pricing.
+5. **PSA API for grading** — auto-populate graded price estimates + Pop Report probabilities.
+6. **Front + back card images**, **grade pill selector** (RAW/PSA/BGS/SGC filters comps),
    proper vector tab icons, animations.
-6. **Native camera** for /scan (currently web file-input only).
+7. **Native camera** for /scan (currently web file-input only).
 
 ## Gotchas we've hit (so you don't waste a session on them)
 

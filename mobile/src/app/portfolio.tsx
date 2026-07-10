@@ -1,6 +1,6 @@
-import { useFocusEffect } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -57,6 +57,10 @@ export default function PortfolioScreen() {
               <Row label="Cost basis" value={`$${data.owned.cost_basis.toFixed(2)}`} />
               <Row label="Unrealized profit" value={`$${data.owned.unrealized_profit.toFixed(2)}`} bold />
             </Section>
+
+            <Pressable onPress={() => router.push('/settings')} style={styles.settingsLink}>
+              <ThemedText type="defaultSemiBold">Settings & integrations ›</ThemedText>
+            </Pressable>
           </ScrollView>
         )}
       </SafeAreaView>
@@ -93,4 +97,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   error: { color: '#ff5555' },
+  settingsLink: {
+    alignSelf: 'flex-start',
+    paddingVertical: Spacing.two,
+    paddingHorizontal: Spacing.three,
+  },
 });

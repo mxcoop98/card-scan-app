@@ -14,6 +14,9 @@ const TABS: Tab[] = [
   { label: 'Portfolio', icon: '$', path: '/portfolio', match: (p) => p.startsWith('/portfolio') || p.startsWith('/explore') },
 ];
 
+// A Settings link — surfaced from the Portfolio screen since we've hit
+// tab-bar cap of 5. Consumers reach /settings via portfolio for now.
+
 export function BottomTabBar() {
   const pathname = usePathname();
   const scheme = useColorScheme() ?? 'light';

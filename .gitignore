@@ -5,3 +5,6 @@ node_modules
 .npmrc
 *.log
 .DS_Store
+
+# Local design references / debugging screenshots
+screenshots/

@@ -1,8 +1,9 @@
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, type TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -92,11 +93,60 @@ export default function ListingDetail() {
 
           {!isSold && <MarkSoldForm listing={listing} onDone={load} />}
 
+          {listing.status === 'draft' && !listing.ebay_listing_id && (
+            <PublishEbayButton listing={listing} onDone={load} />
+          )}
+
+          {listing.ebay_view_url && (
+            <ThemedView type="backgroundElement" style={styles.card}>
+              <ThemedText type="defaultSemiBold">Published to eBay</ThemedText>
+              <Row label="Environment" value={listing.ebay_environment ?? '—'} />
+              <Row label="eBay listing ID" value={listing.ebay_listing_id ?? '—'} />
+              <Pressable
+                onPress={() => { if (typeof window !== 'undefined') window.open(listing.ebay_view_url!, '_blank'); }}
+                style={[styles.button, styles.primary]}>
+                <ThemedText type="defaultSemiBold" style={{ color: 'white' }}>Open in eBay</ThemedText>
+              </Pressable>
+            </ThemedView>
+          )}
+
           <Pressable onPress={del} style={[styles.button, styles.destructive]}>
             <ThemedText type="defaultSemiBold" style={{ color: '#ff5555' }}>Delete listing</ThemedText>
           </Pressable>
         </ScrollView>
       </SafeAreaView>
+    </ThemedView>
+  );
+}
+
+function PublishEbayButton({ listing, onDone }: { listing: Listing; onDone: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  async function publish() {
+    setBusy(true); setErr(null);
+    try {
+      await api.publishToEbay(listing.id);
+      await onDone();
+    } catch (e: any) {
+      setErr(e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <ThemedView type="backgroundElement" style={styles.card}>
+      <ThemedText type="defaultSemiBold">Publish to eBay</ThemedText>
+      <ThemedText type="small" style={{ opacity: 0.7 }}>
+        Push this draft to eBay. Requires you to have connected eBay in Settings.
+        Single-card listings only for v1.
+      </ThemedText>
+      {err && <ThemedText style={styles.error}>{err}</ThemedText>}
+      <Pressable
+        onPress={publish}
+        disabled={busy || !listing.ask_price || listing.cards.length !== 1}
+        style={[styles.button, styles.primary, (busy || !listing.ask_price || listing.cards.length !== 1) && { opacity: 0.4 }]}>
+        <ThemedText type="defaultSemiBold" style={{ color: 'white' }}>
+          {busy ? 'Publishing…' : 'Publish to eBay'}
+        </ThemedText>
+      </Pressable>
     </ThemedView>
   );
 }
@@ -152,12 +202,7 @@ function Field(props: React.ComponentProps<typeof TextInput> & { label: string }
   return (
     <ThemedView style={{ gap: 4, backgroundColor: 'transparent' }}>
       <ThemedText type="small">{label}</ThemedText>
-      <TextInput
-        {...rest}
-        placeholderTextColor="#888"
-        autoCapitalize={rest.autoCapitalize ?? 'none'}
-        style={styles.input}
-      />
+      <ThemedInput {...rest} />
     </ThemedView>
   );
 }
@@ -194,15 +239,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     backgroundColor: 'transparent',
   },
-  input: {
-    borderWidth: 1,
-    borderColor: 'rgba(127,127,127,0.3)',
-    borderRadius: Spacing.two,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
-    fontSize: 16,
-    color: 'white',
-  },
+  input: { paddingHorizontal: Spacing.three, paddingVertical: Spacing.two, fontSize: 16 },
   button: {
     padding: Spacing.three,
     borderRadius: Spacing.three,
