@@ -614,6 +614,16 @@ app.get('/api/ebay/callback', async (req, res) => {
   }
 });
 
+// Return the seller's eBay policies + locations so the user can
+// plug the IDs into env vars (EBAY_*_POLICY_ID).
+app.get('/api/ebay/policies', async (_req, res) => {
+  try {
+    res.json(await ebay.fetchSellerPolicies());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Publish a listing to eBay. Uses hydrated cards + listing row.
 app.post('/api/listings/:id/publish-ebay', async (req, res) => {
   try {

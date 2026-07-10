@@ -160,6 +160,28 @@ export async function status() {
 
 // ---------- Sell API helpers ----------
 
+// Fetch the seller's fulfillment, payment, and return policies plus
+// merchant locations. Requires sell.account scope. Used to grab IDs
+// for the .env config that publishListing needs.
+export async function fetchSellerPolicies() {
+  const marketplaceId = 'EBAY_US';
+  const [fulfillment, payment, ret, locations] = await Promise.all([
+    api('GET', `/sell/account/v1/fulfillment_policy?marketplace_id=${marketplaceId}`).catch((e) => ({ error: e.message })),
+    api('GET', `/sell/account/v1/payment_policy?marketplace_id=${marketplaceId}`).catch((e) => ({ error: e.message })),
+    api('GET', `/sell/account/v1/return_policy?marketplace_id=${marketplaceId}`).catch((e) => ({ error: e.message })),
+    api('GET', `/sell/inventory/v1/location`).catch((e) => ({ error: e.message })),
+  ]);
+  const short = (arr, keyId, keyName) =>
+    Array.isArray(arr) ? arr : (arr?.[keyId] ?? []).map((p) => ({ id: p[keyId] ?? p.policyId, name: p[keyName] ?? p.name, description: p.description }));
+  return {
+    fulfillment_policies: fulfillment.fulfillmentPolicies?.map((p) => ({ id: p.fulfillmentPolicyId, name: p.name, description: p.description })) ?? fulfillment,
+    payment_policies:     payment.paymentPolicies?.map((p) => ({ id: p.paymentPolicyId, name: p.name, description: p.description })) ?? payment,
+    return_policies:      ret.returnPolicies?.map((p) => ({ id: p.returnPolicyId, name: p.name, description: p.description })) ?? ret,
+    merchant_locations:   locations.locations?.map((l) => ({ key: l.merchantLocationKey, name: l.name })) ?? locations,
+    hint: 'Copy the IDs and set EBAY_FULFILLMENT_POLICY_ID / EBAY_PAYMENT_POLICY_ID / EBAY_RETURN_POLICY_ID / EBAY_MERCHANT_LOCATION_KEY in Railway.',
+  };
+}
+
 async function api(method, path, body) {
   const token = await accessToken();
   const res = await fetch(`${hosts().api}${path}`, {
