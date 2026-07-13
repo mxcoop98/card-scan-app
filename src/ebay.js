@@ -232,7 +232,7 @@ export async function setupSandboxSeller() {
               {
                 sortOrder: 1,
                 shippingCarrierCode: 'USPS',
-                shippingServiceCode: 'USPSGroundAdvantage',
+                shippingServiceCode: 'USPSPriority',
                 shippingCost: { value: '4.99', currency: 'USD' },
                 additionalShippingCost: { value: '0.99', currency: 'USD' },
                 buyerResponsibleForShipping: false,
