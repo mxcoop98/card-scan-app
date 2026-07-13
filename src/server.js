@@ -624,6 +624,17 @@ app.get('/api/ebay/policies', async (_req, res) => {
   }
 });
 
+// One-shot sandbox provisioner: opts into Business Policies, creates
+// a default merchant location and default fulfillment/payment/return
+// policies. Idempotent — safe to run repeatedly.
+app.post('/api/ebay/setup-sandbox-seller', async (_req, res) => {
+  try {
+    res.json(await ebay.setupSandboxSeller());
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Publish a listing to eBay. Uses hydrated cards + listing row.
 app.post('/api/listings/:id/publish-ebay', async (req, res) => {
   try {

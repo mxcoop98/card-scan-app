@@ -160,6 +160,147 @@ export async function status() {
 
 // ---------- Sell API helpers ----------
 
+// One-shot sandbox seller provisioner. Idempotent — safe to run
+// repeatedly. Sandbox test users aren't opted into Business Policies
+// or given a merchant location by default; this closes those gaps.
+// Returns the IDs to plug into env vars for publishListing.
+export async function setupSandboxSeller() {
+  const result = { steps: [] };
+  const step = (name, data, error) => result.steps.push({ name, ...(error ? { error } : { data }) });
+
+  // 1. Opt into Business Policies. If already opted in, eBay returns
+  // 409 which we treat as success.
+  try {
+    await api('POST', '/sell/account/v1/program/get_opted_in_programs', undefined).catch(() => null);
+    await api('POST', '/sell/account/v1/program/opt_in', { programType: 'SELLING_POLICY_MANAGEMENT' });
+    step('opt_in_business_policies', { opted_in: true });
+  } catch (e) {
+    // 409 Conflict = already opted in, that's fine
+    if (e.message.includes('409') || e.message.toLowerCase().includes('already')) {
+      step('opt_in_business_policies', { opted_in: 'already' });
+    } else {
+      step('opt_in_business_policies', null, e.message);
+    }
+  }
+
+  // 2. Create a default merchant location. Uses a fixed key so it's idempotent.
+  const locationKey = 'default';
+  try {
+    await api('POST', `/sell/inventory/v1/location/${locationKey}`, {
+      location: {
+        address: {
+          country: 'US',
+          postalCode: '10001',
+          stateOrProvince: 'NY',
+          city: 'New York',
+          addressLine1: '123 Main St',
+        },
+      },
+      locationInstructions: 'Card Tracker default warehouse',
+      name: 'Card Tracker Default',
+      merchantLocationStatus: 'ENABLED',
+      locationTypes: ['WAREHOUSE'],
+    });
+    step('create_location', { merchantLocationKey: locationKey });
+  } catch (e) {
+    if (e.message.includes('204') || e.message.includes('409') || e.message.toLowerCase().includes('exist')) {
+      step('create_location', { merchantLocationKey: locationKey, existed: true });
+    } else {
+      step('create_location', null, e.message);
+    }
+  }
+
+  const marketplaceId = 'EBAY_US';
+
+  // 3a. Fulfillment policy: 3-day handling, USPS Ground Advantage, US only.
+  let fulfillmentId = null;
+  try {
+    const existing = await api('GET', `/sell/account/v1/fulfillment_policy?marketplace_id=${marketplaceId}`).catch(() => null);
+    fulfillmentId = existing?.fulfillmentPolicies?.find((p) => p.name === 'CardTracker Default')?.fulfillmentPolicyId;
+    if (!fulfillmentId) {
+      const created = await api('POST', `/sell/account/v1/fulfillment_policy`, {
+        name: 'CardTracker Default',
+        description: 'Default fulfillment for Card Tracker',
+        marketplaceId,
+        categoryTypes: [{ name: 'ALL_EXCLUDING_MOTORS_VEHICLES' }],
+        handlingTime: { value: 3, unit: 'DAY' },
+        shippingOptions: [
+          {
+            optionType: 'DOMESTIC',
+            costType: 'FLAT_RATE',
+            shippingServices: [
+              {
+                sortOrder: 1,
+                shippingCarrierCode: 'USPS',
+                shippingServiceCode: 'USPSGroundAdvantage',
+                shippingCost: { value: '4.99', currency: 'USD' },
+                additionalShippingCost: { value: '0.99', currency: 'USD' },
+                buyerResponsibleForShipping: false,
+                freeShipping: false,
+              },
+            ],
+          },
+        ],
+      });
+      fulfillmentId = created.fulfillmentPolicyId;
+    }
+    step('fulfillment_policy', { fulfillmentPolicyId: fulfillmentId });
+  } catch (e) {
+    step('fulfillment_policy', null, e.message);
+  }
+
+  // 3b. Payment policy: managed payments (immediate payment required).
+  let paymentId = null;
+  try {
+    const existing = await api('GET', `/sell/account/v1/payment_policy?marketplace_id=${marketplaceId}`).catch(() => null);
+    paymentId = existing?.paymentPolicies?.find((p) => p.name === 'CardTracker Default')?.paymentPolicyId;
+    if (!paymentId) {
+      const created = await api('POST', `/sell/account/v1/payment_policy`, {
+        name: 'CardTracker Default',
+        description: 'Default payment for Card Tracker',
+        marketplaceId,
+        categoryTypes: [{ name: 'ALL_EXCLUDING_MOTORS_VEHICLES' }],
+        immediatePay: true,
+      });
+      paymentId = created.paymentPolicyId;
+    }
+    step('payment_policy', { paymentPolicyId: paymentId });
+  } catch (e) {
+    step('payment_policy', null, e.message);
+  }
+
+  // 3c. Return policy: 30 days, buyer pays return shipping, money back.
+  let returnId = null;
+  try {
+    const existing = await api('GET', `/sell/account/v1/return_policy?marketplace_id=${marketplaceId}`).catch(() => null);
+    returnId = existing?.returnPolicies?.find((p) => p.name === 'CardTracker Default')?.returnPolicyId;
+    if (!returnId) {
+      const created = await api('POST', `/sell/account/v1/return_policy`, {
+        name: 'CardTracker Default',
+        description: 'Default returns for Card Tracker',
+        marketplaceId,
+        categoryTypes: [{ name: 'ALL_EXCLUDING_MOTORS_VEHICLES' }],
+        returnsAccepted: true,
+        returnPeriod: { value: 30, unit: 'DAY' },
+        refundMethod: 'MONEY_BACK',
+        returnShippingCostPayer: 'BUYER',
+      });
+      returnId = created.returnPolicyId;
+    }
+    step('return_policy', { returnPolicyId: returnId });
+  } catch (e) {
+    step('return_policy', null, e.message);
+  }
+
+  result.env_vars_to_set = {
+    EBAY_MERCHANT_LOCATION_KEY: locationKey,
+    EBAY_FULFILLMENT_POLICY_ID: fulfillmentId,
+    EBAY_PAYMENT_POLICY_ID: paymentId,
+    EBAY_RETURN_POLICY_ID: returnId,
+  };
+  return result;
+}
+
 // Fetch the seller's fulfillment, payment, and return policies plus
 // merchant locations. Requires sell.account scope. Used to grab IDs
 // for the .env config that publishListing needs.
