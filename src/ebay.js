@@ -428,11 +428,35 @@ function buildDescription(listing, card) {
 
 function buildAspects(card) {
   const a = {};
+  // Category-specific required aspects. eBay is strict about these
+  // per category — Pokémon TCG requires "Game", sports cards need
+  // "Sport" / "League" / etc. Filling them defensively.
+  if (card.category === 'pokemon') {
+    a['Game']         = ['Pokémon TCG'];
+    a['Type']         = ['Individual Card'];
+    a['Manufacturer'] = ['The Pokémon Company'];
+  } else if (card.category === 'sports') {
+    if (card.sport) a['Sport'] = [card.sport];
+    a['Type']       = ['Sports Trading Card'];
+    if (card.player) a['Player'] = [card.player];
+    if (card.team)   a['Team']   = [card.team];
+  }
+  // Common aspects across both
   if (card.year)      a['Year Manufactured'] = [String(card.year)];
   if (card.set_name)  a['Set'] = [card.set_name];
   if (card.name)      a['Character']  = [card.name];
   if (card.card_number) a['Card Number'] = [String(card.card_number)];
-  if (card.grader)    a['Professional Grader'] = [card.grader];
+  if (card.grader) {
+    a['Professional Grader'] = [card.grader];
+    a['Graded'] = ['Yes'];
+  } else {
+    a['Graded'] = ['No'];
+  }
   if (card.grade)     a['Grade'] = [String(card.grade)];
+  a['Vintage']        = card.year && Number(card.year) < 2000 ? ['Yes'] : ['No'];
+  a['Features']       = ['Base Set'];
+  a['Language']       = ['English'];
+  a['Country/Region of Manufacture'] = ['United States'];
+  a['Autographed']    = ['No'];
   return a;
 }
