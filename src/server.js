@@ -635,6 +635,16 @@ app.post('/api/ebay/setup-sandbox-seller', async (_req, res) => {
   }
 });
 
+// Pull recent orders from eBay and auto-mark-sold on matching listings.
+app.post('/api/ebay/sync-orders', async (req, res) => {
+  try {
+    const days = req.query.lookback_days ? Number(req.query.lookback_days) : 30;
+    res.json(await ebay.syncOrders({ lookbackDays: days }));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Publish a listing to eBay. Uses hydrated cards + listing row.
 app.post('/api/listings/:id/publish-ebay', async (req, res) => {
   try {

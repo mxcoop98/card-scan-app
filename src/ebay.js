@@ -10,6 +10,7 @@
 // ============================================================
 
 import { query } from './db.js';
+export { query };
 
 const HOSTS = {
   sandbox: {
@@ -405,6 +406,68 @@ export async function publishListing({ listing, cards }) {
   );
 
   return { sku, offerId: offer.offerId, listingId, viewUrl };
+}
+
+// Pull recent orders from eBay's Fulfillment API and mark any matching
+// local listing as sold. Idempotent — skips listings already sold.
+// Requires sell.fulfillment scope.
+export async function syncOrders({ lookbackDays = 30 } = {}) {
+  const since = new Date(Date.now() - lookbackDays * 24 * 60 * 60 * 1000)
+    .toISOString()
+    .replace(/\.\d+Z$/, 'Z'); // eBay wants ISO without ms
+  const path = `/sell/fulfillment/v1/order?filter=${encodeURIComponent(`creationdate:[${since}..]`)}&limit=200`;
+  const data = await api('GET', path);
+  const orders = data.orders ?? [];
+  const result = { checked: orders.length, updated: [], skipped: [], errors: [] };
+
+  for (const order of orders) {
+    for (const item of order.lineItems ?? []) {
+      const legacyListingId = item.legacyItemId;
+      if (!legacyListingId) continue;
+      try {
+        const { rows } = await query(
+          'SELECT * FROM listings WHERE ebay_listing_id = $1',
+          [String(legacyListingId)]
+        );
+        if (rows.length === 0) {
+          result.skipped.push({ ebay_listing_id: legacyListingId, reason: 'no local listing' });
+          continue;
+        }
+        const local = rows[0];
+        if (local.status === 'sold') {
+          result.skipped.push({ id: local.id, ebay_listing_id: legacyListingId, reason: 'already sold' });
+          continue;
+        }
+        const soldPrice = Number(item.lineItemCost?.value ?? order.pricingSummary?.priceSubtotal?.value ?? 0);
+        const fees      = Number(order.pricingSummary?.fee?.value ?? 0);
+        const shipping  = Number(order.pricingSummary?.deliveryCost?.shippingCost?.value ?? 0);
+        await query(
+          `UPDATE listings SET
+             status = 'sold',
+             sold_price = $1,
+             sold_at = $2,
+             platform_fees = $3,
+             shipping_cost = $4,
+             external_listing_id = COALESCE(external_listing_id, $5),
+             ebay_last_synced_at = now(),
+             updated_at = now()
+           WHERE id = $6`,
+          [soldPrice, order.creationDate, fees, shipping, String(order.orderId ?? legacyListingId), local.id]
+        );
+        result.updated.push({
+          id: local.id,
+          ebay_listing_id: legacyListingId,
+          sold_price: soldPrice,
+          fees,
+          shipping,
+          order_id: order.orderId,
+        });
+      } catch (e) {
+        result.errors.push({ ebay_listing_id: legacyListingId, error: e.message });
+      }
+    }
+  }
+  return result;
 }
 
 function buildTitle(_listing, card) {

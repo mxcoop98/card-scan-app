@@ -72,6 +72,9 @@ export default function SettingsScreen() {
                   </ThemedText>
                 </Pressable>
 
+                {ebay.connected && <SyncOrdersButton />}
+                {ebay.connected && <SetupSellerButton />}
+
                 {!ebay.configured && (
                   <ThemedText type="small" style={{ opacity: 0.7 }}>
                     Add the eBay app credentials to the backend .env, then restart the server before connecting.
@@ -83,6 +86,52 @@ export default function SettingsScreen() {
         </ScrollView>
       </SafeAreaView>
     </ThemedView>
+  );
+}
+
+function SyncOrdersButton() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  async function sync() {
+    setBusy(true); setResult(null);
+    try {
+      const r = await api.ebaySyncOrders();
+      setResult(`Checked ${r.checked} orders · marked ${r.updated.length} sold · skipped ${r.skipped.length}`);
+    } catch (e: any) {
+      setResult('Error: ' + e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <Pressable onPress={sync} disabled={busy} style={[styles.button, busy && { opacity: 0.4 }]}>
+        <ThemedText type="defaultSemiBold">{busy ? 'Syncing…' : 'Sync eBay orders'}</ThemedText>
+      </Pressable>
+      {result && <ThemedText type="small" style={{ opacity: 0.7 }}>{result}</ThemedText>}
+    </>
+  );
+}
+
+function SetupSellerButton() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  async function run() {
+    setBusy(true); setResult(null);
+    try {
+      const r = await api.ebaySetupSandboxSeller();
+      const failed = r.steps.filter((s) => s.error);
+      const ok = r.steps.filter((s) => !s.error);
+      setResult(`Setup done: ${ok.length} ok, ${failed.length} failed. Check backend logs for env vars.`);
+    } catch (e: any) {
+      setResult('Error: ' + e.message);
+    } finally { setBusy(false); }
+  }
+  return (
+    <>
+      <Pressable onPress={run} disabled={busy} style={[styles.button, busy && { opacity: 0.4 }]}>
+        <ThemedText type="defaultSemiBold">{busy ? 'Provisioning…' : 'Provision sandbox seller (one-time)'}</ThemedText>
+      </Pressable>
+      {result && <ThemedText type="small" style={{ opacity: 0.7 }}>{result}</ThemedText>}
+    </>
   );
 }
 

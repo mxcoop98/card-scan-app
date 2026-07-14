@@ -322,6 +322,16 @@ export const api = {
       `/api/listings/${listingId}/publish-ebay`,
       { method: 'POST' }
     ),
+  ebaySetupSandboxSeller: () =>
+    req<{ steps: any[]; env_vars_to_set: Record<string, string | null> }>(
+      '/api/ebay/setup-sandbox-seller',
+      { method: 'POST' }
+    ),
+  ebaySyncOrders: (lookbackDays?: number) =>
+    req<{ checked: number; updated: any[]; skipped: any[]; errors: any[] }>(
+      `/api/ebay/sync-orders${lookbackDays ? `?lookback_days=${lookbackDays}` : ''}`,
+      { method: 'POST' }
+    ),
 };
 
 export type EbayStatus = {
