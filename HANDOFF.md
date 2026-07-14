@@ -1,7 +1,26 @@
 # Card Tracker — Handoff
 
 Onboarding doc so any new session (Claude Code or human) can pick this up cleanly.
-Written 2026-07-09.
+Written 2026-07-09, updated 2026-07-14 (eBay integration shipped to Railway sandbox).
+
+## Deployed state (as of 2026-07-14)
+
+- **Backend live on Railway**: https://card-scan-app-production.up.railway.app
+  - Postgres provisioned as sibling Railway service, wired via literal `DATABASE_URL`
+    (not the `${{Postgres.DATABASE_URL}}` reference — that gave us circular issues).
+  - Railway networking port set to **8080** (matches what `process.env.PORT` gives Node
+    on Railway; do NOT change to 3000 without adding a `PORT=3000` env var too).
+- **Frontend still runs locally** (`mobile/.env` has `EXPO_PUBLIC_API_URL` pointing at
+  Railway). Both desktop and phone browsers hit Railway.
+- **eBay OAuth**: connected via sandbox test user, all 4 scopes granted
+  (`api_scope` + `sell.inventory` + `sell.account` + `sell.fulfillment`).
+  Access token 2hr, refresh token 18mo (auto-refresh on demand).
+- **First real publish confirmed 2026-07-14**: Charizard listed at sandbox eBay listing
+  ID `110589912281`, view URL `https://sandbox.ebay.com/itm/110589912281`.
+
+## GitHub
+
+`https://github.com/mxcoop98/card-scan-app` — Railway auto-deploys off `main`.
 
 ## What it is
 
@@ -121,43 +140,122 @@ returns `{candidates: [...]}`.
 Variants: `GET /api/variants?category=pokemon&name=Charizard[&set_name=&card_number=]`
 returns `{variants: [...]}` — every printing across sets for the parallel picker.
 
-eBay: `GET /api/ebay/status`, `GET /api/ebay/authorize-url`,
-`GET /api/ebay/callback` (redirect target, exchanges auth code for tokens),
-`POST /api/listings/:id/publish-ebay` (v1: single-card only).
+eBay:
+- `GET  /api/ebay/status` — connection state + configured scopes.
+- `GET  /api/ebay/authorize-url` — returns URL to redirect user to.
+- `GET  /api/ebay/callback?code=` — code→token exchange target.
+- `GET  /api/ebay/policies` — dump seller's fulfillment/payment/return policies + locations.
+- `POST /api/ebay/setup-sandbox-seller` — one-shot idempotent provisioner:
+  opts into Business Policies, creates default merchant location + default
+  fulfillment/payment/return policies. Returns the IDs to plug into env.
+- `POST /api/ebay/sync-orders?lookback_days=30` — pull recent orders,
+  match to `listings.ebay_listing_id`, mark sold with real price/fees/shipping.
+- `POST /api/listings/:id/publish-ebay` — v1: single-card only.
 
 Health: `GET /health`.
 
-## eBay integration setup
+## eBay integration setup — LESSONS LEARNED (do not relearn these)
 
-**Blocked on: eBay Developer Program approval** (~24h after signup).
+**Fully wired end-to-end 2026-07-14.** All the gotchas hit + coded around:
 
-Once approved:
+### 1. HTTPS required — no localhost. Use Railway.
 
-1. In eBay Developer Console → create an app, get the **Sandbox** keyset
-   (App ID / Cert ID / RuName). Add these to backend `.env`:
-   ```
-   EBAY_ENV=sandbox
-   EBAY_CLIENT_ID=<App ID>
-   EBAY_CLIENT_SECRET=<Cert ID>
-   EBAY_REDIRECT_URI=http://localhost:3000/api/ebay/callback
-   ```
-2. In Developer Console → your app → User Tokens → set your Auth Accepted URL to the
-   same `http://localhost:3000/api/ebay/callback`.
-3. Restart the backend (`node src/server.js`).
-4. Open the app → Portfolio → "Settings & integrations ›" → "Connect eBay". Sign in
-   with a **sandbox test user** (create one at developer.ebay.com → Sandbox → Test users).
-5. Back in the app, "Connected: Yes" should show. Access token expires in 2 hours,
-   refresh token in 18 months; refresh is automatic.
-6. On a draft listing (single card, ask_price set) → "Publish to eBay". If it succeeds
-   the listing detail page shows an "Open in eBay" link to the sandbox listing.
+eBay Developer Console's Auth Accepted URL field silently enforces HTTPS + a real
+public domain. `localhost` is rejected regardless of what the docs say. Railway
+gives us HTTPS for free. If you need to test locally without Railway, use
+Cloudflare quick tunnel (`docker run --rm cloudflare/cloudflared:latest tunnel
+--url http://host.docker.internal:3000`) for a temporary HTTPS URL.
 
-If publish fails, the most common reasons are missing seller policies. Get the IDs
-from the eBay Sell Account API and add to `.env`:
+### 2. Required env vars on Railway
+
 ```
-EBAY_FULFILLMENT_POLICY_ID=
-EBAY_PAYMENT_POLICY_ID=
-EBAY_RETURN_POLICY_ID=
+EBAY_ENV=sandbox
+EBAY_CLIENT_ID=<Sandbox App ID>
+EBAY_CLIENT_SECRET=<Sandbox Cert ID>
+EBAY_REDIRECT_URI=https://card-scan-app-production.up.railway.app/api/ebay/callback
+EBAY_RUNAME=<RuName from Developer Console — looks like "Firstname_Lastname-XXX-XXX-xxxxx">
+EBAY_SCOPES=https://api.ebay.com/oauth/api_scope https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope/sell.account https://api.ebay.com/oauth/api_scope/sell.fulfillment
 EBAY_MERCHANT_LOCATION_KEY=default
+EBAY_FULFILLMENT_POLICY_ID=6236562000
+EBAY_PAYMENT_POLICY_ID=6236560000
+EBAY_RETURN_POLICY_ID=6236561000
+```
+
+The policy IDs come from `POST /api/ebay/setup-sandbox-seller` (below).
+
+### 3. RuName vs URL for OAuth's `redirect_uri`
+
+eBay's OAuth 2.0 wants the RuName as the `redirect_uri` query parameter, NOT the
+literal URL. eBay uses the RuName to look up the Auth Accepted URL. Our `ebay.js`
+uses `EBAY_RUNAME` for the redirect_uri if set. If you skip the RuName, OAuth
+silently fails with a "temporarily_unavailable" error which is really "we can't
+find your RuName".
+
+### 4. Sandbox login has a TESTUSER_ prefix
+
+When signing in with a sandbox test user during OAuth, prepend `TESTUSER_` to
+the username shown in Developer Console. Without it, you get "password incorrect"
+even with the right password. Undocumented but well-known once you know.
+
+### 5. Password reset in sandbox is broken (DNS error)
+
+If the sandbox test user's password ever "doesn't work", delete the user in
+Developer Console → Sandbox → Test Users and create a new one. NEVER use the
+password reset link — it points to a broken domain. Use a boring compliant
+password (`CardScan1!` shape — 8+ chars, upper + lower + number + symbol).
+
+### 6. RuName redirect quirk (workaround: manual code exchange)
+
+After OAuth consent, eBay sometimes lands on `auth2.ebay.com/oauth2/ThirdPartyAuthSucessFailure`
+("Authorization successfully completed. It's now safe to close the browser window")
+instead of redirecting to our Railway callback. The URL contains `?code=...`.
+Copy the whole URL to Claude / a curl, then hit:
+`GET https://card-scan-app-production.up.railway.app/api/ebay/callback?code=<the-code>`
+to complete the exchange manually. Code is valid for 5 minutes.
+
+Root cause is probably a RuName ↔ Auth Accepted URL config mismatch in Developer
+Console. Investigate + fix in a future session for smoother UX.
+
+### 7. Sandbox users need onboarding before publish works
+
+Sandbox test users aren't opted into Business Policies and lack a merchant
+location by default, which blocks the Sell API. Use our one-shot provisioner:
+
+```
+curl -X POST https://card-scan-app-production.up.railway.app/api/ebay/setup-sandbox-seller
+```
+
+It idempotently: opts into Business Policies, creates a default warehouse, and
+creates fulfillment/payment/return policies named "CardTracker Default". Returns
+IDs to plug into env vars (see step 2).
+
+### 8. eBay Inventory API needs Accept-Language header
+
+Not just `Content-Language`. Missing it returns errorId 25709 ("Invalid value for
+header Accept-Language"). Both headers are set in `api()` helper in `ebay.js`.
+
+### 9. Publish requires category-specific aspects
+
+Pokémon TCG (category 183454) requires the `Game` aspect. Sports need `Sport` /
+`Player` / `Team`. `buildAspects()` in `ebay.js` fills these based on card.category.
+If eBay complains about a missing aspect, add it to that function.
+
+### 10. Order sync blocked in sandbox
+
+`GET /sell/fulfillment/v1/order` returns 403 "Insufficient permissions" for
+sandbox test users even with `sell.fulfillment` scope granted. eBay requires
+full seller onboarding (identity verification, linked payments) for order
+visibility — not something sandbox provides. `POST /api/ebay/sync-orders` is
+coded correctly and will work in production. For sandbox demos, use the manual
+"Record sale" form on the listing detail page instead.
+
+### Reconnecting after adding a new scope
+
+Refresh tokens can only refresh with their originally-granted scopes. Adding a
+new scope requires a fresh consent flow (not a refresh). If you add a scope to
+`EBAY_SCOPES` and try to use it, you'll get `invalid_scope` from the token
+refresh endpoint. Fix: click Reconnect eBay in the app, do the OAuth flow again,
+copy the new code, exchange.
 ```
 
 ## What's built vs not
@@ -174,9 +272,10 @@ EBAY_MERCHANT_LOCATION_KEY=default
 **Not built (roadmap):**
 1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is hint search.
    Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider when we're ready to pay.
-2. **eBay integration — v1 shipped 2026-07-09** (OAuth, publish single-card, view URL).
-   Still todo: multi-card lot listings, seller policy discovery, order polling for auto
-   mark-sold, real category/aspect mapping, production-mode HTTPS setup.
+2. **eBay integration — v2 shipped 2026-07-14**. OAuth + publish single-card + auto-provision
+   sandbox seller + order sync (production-only, blocked in sandbox). Still todo:
+   multi-card lot listings, RuName redirect fix (currently requires manual code copy),
+   scheduled order-sync cron, production seller onboarding, category/aspect polish.
 3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings, Card Ladder,
    SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate one — present tradeoffs.
 4. **Sports variant discovery** — the `/api/variants` endpoint returns empty for sports
@@ -185,6 +284,10 @@ EBAY_MERCHANT_LOCATION_KEY=default
 6. **Front + back card images**, **grade pill selector** (RAW/PSA/BGS/SGC filters comps),
    proper vector tab icons, animations.
 7. **Native camera** for /scan (currently web file-input only).
+8. **Portfolio sparkline** — was originally built but appears to have been overwritten
+   (portfolio.tsx currently lacks the SVG line chart). `src/components/sparkline.tsx`
+   still exists and `GET /api/portfolio/timeseries` still works — just needs to be
+   wired back into the portfolio screen.
 
 ## Gotchas we've hit (so you don't waste a session on them)
 
