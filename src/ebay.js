@@ -331,6 +331,7 @@ async function api(method, path, body) {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
       'Content-Language': 'en-US',
+      'Accept-Language': 'en-US',
       Accept: 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
