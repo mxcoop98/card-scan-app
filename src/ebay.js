@@ -434,10 +434,10 @@ export async function publishListing({ listing, cards }) {
 }
 
 function pickCondition({ isLot, card }) {
-  // Sell API enums per category. Trading Card Mixed Lots categories
-  // are pickier than singles about conditions. LIKE_NEW is accepted
-  // for lots since it maps to a valid trading-card condition ID.
-  if (isLot) return 'LIKE_NEW';                 // mixed lots
+  // Sell API enums per category. Pokémon Mixed Card Lots (183456)
+  // rejects every "USED_*" enum and even LIKE_NEW. NEW is one of the
+  // few conditions valid across trading card lot categories.
+  if (isLot) return 'NEW';                      // mixed lots
   if (card.grader) return 'LIKE_NEW';           // graded singles
   return 'USED_EXCELLENT';                      // raw singles
 }
