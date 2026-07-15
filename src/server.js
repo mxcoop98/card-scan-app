@@ -661,6 +661,27 @@ app.post('/api/listings/:id/publish-ebay', async (req, res) => {
   }
 });
 
+// Delete the eBay inventory item + offers for a listing (leaves the
+// local listing row intact). Use this to recover from a failed publish
+// where stale offer state is blocking retries.
+app.post('/api/listings/:id/ebay-reset', async (req, res) => {
+  try {
+    const l = await query('SELECT * FROM listings WHERE id = $1', [req.params.id]);
+    if (!l.rows[0]) return res.status(404).json({ error: 'listing not found' });
+    const sku = 'ct-' + l.rows[0].id;
+    const deleted = await ebay.resetInventory({ sku });
+    await query(
+      `UPDATE listings SET ebay_offer_id=NULL, ebay_listing_id=NULL, ebay_view_url=NULL,
+       ebay_environment=NULL, ebay_sku=NULL, ebay_last_synced_at=NULL, status='draft'
+       WHERE id=$1`,
+      [req.params.id]
+    );
+    res.json({ ok: true, sku, ...deleted });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Historical portfolio value: for each day we have data, sum the last
 // known USD market price per card as of that day. Powers the sparkline.
 app.get('/api/portfolio/timeseries', async (_req, res) => {

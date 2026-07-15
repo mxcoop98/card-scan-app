@@ -449,6 +449,23 @@ function pickCategory({ category, isLot }) {
   return '183454';
 }
 
+// Delete an inventory item + its offer(s) for a SKU. Idempotent —
+// swallows "not found" errors. Used to reset stale state from failed
+// publish attempts before retrying.
+export async function resetInventory({ sku }) {
+  const deleted = { offers: 0, item: false };
+  try {
+    const existing = await api('GET', `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+    for (const o of existing?.offers ?? []) {
+      try { await api('DELETE', `/sell/inventory/v1/offer/${o.offerId}`); deleted.offers++; }
+      catch (e) { /* swallow */ }
+    }
+  } catch {}
+  try { await api('DELETE', `/sell/inventory/v1/inventory_item/${sku}`); deleted.item = true; }
+  catch {}
+  return deleted;
+}
+
 // Pull recent orders from eBay's Fulfillment API and mark any matching
 // local listing as sold. Idempotent — skips listings already sold.
 // Requires sell.fulfillment scope.
