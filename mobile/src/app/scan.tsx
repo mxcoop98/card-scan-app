@@ -306,10 +306,47 @@ function CameraCapture({ onCapture, hasCaptured }: { onCapture: (uri: string) =>
       </label>
     );
   }
+  return <NativeCameraCapture onCapture={onCapture} hasCaptured={hasCaptured} />;
+}
+
+function NativeCameraCapture({ onCapture, hasCaptured }: { onCapture: (uri: string) => void; hasCaptured: boolean }) {
+  async function pickFromCamera() {
+    const ImagePicker = await import('expo-image-picker');
+    const perm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!perm.granted) return;
+    const res = await ImagePicker.launchCameraAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const asset = res.assets[0];
+    onCapture(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri);
+  }
+  async function pickFromLibrary() {
+    const ImagePicker = await import('expo-image-picker');
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      quality: 0.8,
+      base64: true,
+    });
+    if (res.canceled || !res.assets?.[0]) return;
+    const asset = res.assets[0];
+    onCapture(asset.base64 ? `data:image/jpeg;base64,${asset.base64}` : asset.uri);
+  }
   return (
-    <ThemedText type="small" style={{ opacity: 0.6, textAlign: 'center', padding: Spacing.three }}>
-      Native camera coming — install expo-image-picker.
-    </ThemedText>
+    <ThemedView style={{ flexDirection: 'row', gap: Spacing.two, backgroundColor: 'transparent', marginTop: Spacing.three }}>
+      <Pressable onPress={pickFromCamera} style={[styles.button, styles.primary, { flex: 1 }]}>
+        <ThemedText type="defaultSemiBold" style={{ color: 'white' }}>
+          📷  {hasCaptured ? 'Retake' : 'Camera'}
+        </ThemedText>
+      </Pressable>
+      <Pressable onPress={pickFromLibrary} style={[styles.button, { flex: 1 }]}>
+        <ThemedText type="defaultSemiBold">Library</ThemedText>
+      </Pressable>
+    </ThemedView>
   );
 }
 
