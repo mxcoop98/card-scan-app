@@ -435,9 +435,9 @@ export async function publishListing({ listing, cards }) {
 
 function pickCondition({ isLot, card }) {
   // Sell API enums per category. Trading Card Mixed Lots categories
-  // reject USED_VERY_GOOD and plain USED (not a valid enum). USED_GOOD
-  // is accepted across both single-card and lot categories.
-  if (isLot) return 'USED_GOOD';                // mixed lots
+  // are pickier than singles about conditions. LIKE_NEW is accepted
+  // for lots since it maps to a valid trading-card condition ID.
+  if (isLot) return 'LIKE_NEW';                 // mixed lots
   if (card.grader) return 'LIKE_NEW';           // graded singles
   return 'USED_EXCELLENT';                      // raw singles
 }
