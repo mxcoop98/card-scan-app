@@ -136,15 +136,19 @@ function PublishEbayButton({ listing, onDone }: { listing: Listing; onDone: () =
       <ThemedText type="defaultSemiBold">Publish to eBay</ThemedText>
       <ThemedText type="small" style={{ opacity: 0.7 }}>
         Push this draft to eBay. Requires you to have connected eBay in Settings.
-        Single-card listings only for v1.
+        {listing.cards.length > 1 ? ` Will publish as a ${listing.cards.length}-card lot.` : ''}
       </ThemedText>
       {err && <ThemedText style={styles.error}>{err}</ThemedText>}
       <Pressable
         onPress={publish}
-        disabled={busy || !listing.ask_price || listing.cards.length !== 1}
-        style={[styles.button, styles.primary, (busy || !listing.ask_price || listing.cards.length !== 1) && { opacity: 0.4 }]}>
+        disabled={busy || !listing.ask_price}
+        style={[styles.button, styles.primary, (busy || !listing.ask_price) && { opacity: 0.4 }]}>
         <ThemedText type="defaultSemiBold" style={{ color: 'white' }}>
-          {busy ? 'Publishing…' : 'Publish to eBay'}
+          {busy
+            ? 'Publishing…'
+            : listing.cards.length === 1
+            ? 'Publish to eBay'
+            : `Publish ${listing.cards.length}-card lot to eBay`}
         </ThemedText>
       </Pressable>
     </ThemedView>

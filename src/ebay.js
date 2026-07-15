@@ -343,27 +343,29 @@ async function api(method, path, body) {
 }
 
 // Publish a listing derived from a Card Tracker listing row + its cards.
-// Very v1: single-card listings only. Multi-card lots come later.
+// Handles both single-card and multi-card lot listings.
 export async function publishListing({ listing, cards }) {
   if (!listing) throw new Error('listing required');
-  if (cards.length !== 1) throw new Error('multi-card lots not yet supported for eBay');
-  const card = cards[0];
+  if (!cards || cards.length === 0) throw new Error('listing has no cards');
 
   const sku = `ct-${listing.id}`;
   const askPrice = listing.ask_price ? Number(listing.ask_price).toFixed(2) : null;
   if (!askPrice) throw new Error('listing.ask_price is required to publish');
 
+  const isLot = cards.length > 1;
+  const primary = cards[0];
+  // eBay accepts up to 24 image URLs per listing.
+  const imageUrls = cards.map((c) => c.image_url).filter(Boolean).slice(0, 24);
+
   // 1. Create/update the inventory item
   await api('PUT', `/sell/inventory/v1/inventory_item/${sku}`, {
-    availability: {
-      shipToLocationAvailability: { quantity: 1 },
-    },
-    condition: card.grader ? 'LIKE_NEW' : 'USED_EXCELLENT', // TODO: real grade→condition map
+    availability: { shipToLocationAvailability: { quantity: 1 } },
+    condition: pickCondition({ isLot, card: primary }),
     product: {
-      title: buildTitle(listing, card),
-      description: buildDescription(listing, card),
-      aspects: buildAspects(card),
-      imageUrls: card.image_url ? [card.image_url] : [],
+      title: buildTitle(listing, cards),
+      description: buildDescription(listing, cards),
+      aspects: buildAspects(listing, cards),
+      imageUrls,
     },
   });
 
@@ -373,11 +375,11 @@ export async function publishListing({ listing, cards }) {
     marketplaceId: 'EBAY_US',
     format: 'FIXED_PRICE',
     availableQuantity: 1,
-    categoryId: card.category === 'pokemon' ? '183454' : '213', // Pokemon TCG Individual Cards / Sports Trading Cards
+    categoryId: pickCategory({ category: primary.category, isLot }),
     pricingSummary: { price: { value: askPrice, currency: 'USD' } },
     listingPolicies: {
-      // These IDs must come from the seller's Account API. Placeholder
-      // for now — will error at publish time until the user fills these in.
+      // These IDs come from the seller's Account API. Populate via env
+      // vars (see /api/ebay/setup-sandbox-seller).
       fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID ?? '',
       paymentPolicyId:     process.env.EBAY_PAYMENT_POLICY_ID     ?? '',
       returnPolicyId:      process.env.EBAY_RETURN_POLICY_ID      ?? '',
@@ -405,7 +407,20 @@ export async function publishListing({ listing, cards }) {
     [env(), sku, offer.offerId, listingId, viewUrl, listing.id]
   );
 
-  return { sku, offerId: offer.offerId, listingId, viewUrl };
+  return { sku, offerId: offer.offerId, listingId, viewUrl, is_lot: isLot, card_count: cards.length };
+}
+
+function pickCondition({ isLot, card }) {
+  if (isLot) return 'USED_VERY_GOOD';           // safe default for mixed lots
+  if (card.grader) return 'LIKE_NEW';           // graded singles
+  return 'USED_EXCELLENT';                      // raw singles
+}
+
+// eBay category IDs. Lots go to Mixed Card Lots, singles to Individual.
+function pickCategory({ category, isLot }) {
+  if (category === 'pokemon') return isLot ? '183456' : '183454';  // Pokemon Mixed Lots / Individual
+  if (category === 'sports')  return isLot ? '261328' : '212';     // Sports Mixed Lots / Singles
+  return '183454';
 }
 
 // Pull recent orders from eBay's Fulfillment API and mark any matching
@@ -470,30 +485,57 @@ export async function syncOrders({ lookbackDays = 30 } = {}) {
   return result;
 }
 
-function buildTitle(_listing, card) {
-  const parts = [card.year, card.set_name, card.name, card.card_number, card.grader && `${card.grader} ${card.grade}`]
-    .filter(Boolean);
+function buildTitle(listing, cards) {
   // eBay title limit is 80 characters.
+  if (cards.length === 1) {
+    const c = cards[0];
+    const parts = [c.year, c.set_name, c.name, c.card_number, c.grader && `${c.grader} ${c.grade}`]
+      .filter(Boolean);
+    return parts.join(' ').slice(0, 80);
+  }
+  // Lot: honor user-supplied title if present, else compose.
+  if (listing.title) return listing.title.slice(0, 80);
+  const commonSet = allSame(cards, 'set_name') ? cards[0].set_name : null;
+  const commonYear = allSame(cards, 'year') ? cards[0].year : null;
+  const catLabel = cards[0].category === 'pokemon' ? 'Pokemon' : 'Sports';
+  const parts = [commonYear, commonSet, catLabel, 'Card Lot', `(${cards.length} cards)`].filter(Boolean);
   return parts.join(' ').slice(0, 80);
 }
 
-function buildDescription(listing, card) {
+function buildDescription(listing, cards) {
+  if (cards.length === 1) {
+    const card = cards[0];
+    return [
+      `<h2>${card.name}</h2>`,
+      card.set_name && `<p><b>Set:</b> ${card.set_name}</p>`,
+      card.card_number && `<p><b>Card #:</b> ${card.card_number}</p>`,
+      card.year && `<p><b>Year:</b> ${card.year}</p>`,
+      card.grader && `<p><b>Grade:</b> ${card.grader} ${card.grade ?? ''}</p>`,
+      listing.notes && `<p>${listing.notes}</p>`,
+      `<p>Listed via Card Tracker.</p>`,
+    ].filter(Boolean).join('');
+  }
+  // Lot description: list every card as a line item.
+  const items = cards.map((c) => {
+    const meta = [c.set_name, c.card_number, c.year].filter(Boolean).join(' · ');
+    return `<li><b>${c.name}</b>${meta ? ` — ${meta}` : ''}</li>`;
+  }).join('');
   return [
-    `<h2>${card.name}</h2>`,
-    card.set_name && `<p><b>Set:</b> ${card.set_name}</p>`,
-    card.card_number && `<p><b>Card #:</b> ${card.card_number}</p>`,
-    card.year && `<p><b>Year:</b> ${card.year}</p>`,
-    card.grader && `<p><b>Grade:</b> ${card.grader} ${card.grade ?? ''}</p>`,
+    `<h2>${cards.length}-Card Lot${listing.title ? `: ${listing.title}` : ''}</h2>`,
+    `<p>Includes ${cards.length} cards:</p>`,
+    `<ul>${items}</ul>`,
     listing.notes && `<p>${listing.notes}</p>`,
     `<p>Listed via Card Tracker.</p>`,
   ].filter(Boolean).join('');
 }
 
-function buildAspects(card) {
+function buildAspects(_listing, cards) {
+  if (cards.length === 1) return buildSingleAspects(cards[0]);
+  return buildLotAspects(cards);
+}
+
+function buildSingleAspects(card) {
   const a = {};
-  // Category-specific required aspects. eBay is strict about these
-  // per category — Pokémon TCG requires "Game", sports cards need
-  // "Sport" / "League" / etc. Filling them defensively.
   if (card.category === 'pokemon') {
     a['Game']         = ['Pokémon TCG'];
     a['Type']         = ['Individual Card'];
@@ -504,22 +546,52 @@ function buildAspects(card) {
     if (card.player) a['Player'] = [card.player];
     if (card.team)   a['Team']   = [card.team];
   }
-  // Common aspects across both
-  if (card.year)      a['Year Manufactured'] = [String(card.year)];
-  if (card.set_name)  a['Set'] = [card.set_name];
-  if (card.name)      a['Character']  = [card.name];
-  if (card.card_number) a['Card Number'] = [String(card.card_number)];
+  if (card.year)        a['Year Manufactured'] = [String(card.year)];
+  if (card.set_name)    a['Set']               = [card.set_name];
+  if (card.name)        a['Character']         = [card.name];
+  if (card.card_number) a['Card Number']       = [String(card.card_number)];
   if (card.grader) {
     a['Professional Grader'] = [card.grader];
     a['Graded'] = ['Yes'];
   } else {
     a['Graded'] = ['No'];
   }
-  if (card.grade)     a['Grade'] = [String(card.grade)];
-  a['Vintage']        = card.year && Number(card.year) < 2000 ? ['Yes'] : ['No'];
-  a['Features']       = ['Base Set'];
-  a['Language']       = ['English'];
+  if (card.grade) a['Grade'] = [String(card.grade)];
+  a['Vintage']    = card.year && Number(card.year) < 2000 ? ['Yes'] : ['No'];
+  a['Features']   = ['Base Set'];
+  a['Language']   = ['English'];
   a['Country/Region of Manufacture'] = ['United States'];
-  a['Autographed']    = ['No'];
+  a['Autographed'] = ['No'];
   return a;
+}
+
+function buildLotAspects(cards) {
+  const a = {};
+  const first = cards[0];
+  if (first.category === 'pokemon') {
+    a['Game']         = ['Pokémon TCG'];
+    a['Type']         = ['Card Lot'];
+    a['Manufacturer'] = ['The Pokémon Company'];
+  } else if (first.category === 'sports') {
+    if (first.sport) a['Sport'] = [first.sport];
+    a['Type'] = ['Card Lot'];
+  }
+  // If every card shares a set / year, surface it. Otherwise leave off
+  // rather than pick misleading data.
+  if (allSame(cards, 'set_name') && first.set_name)  a['Set'] = [first.set_name];
+  if (allSame(cards, 'year')     && first.year)      a['Year Manufactured'] = [String(first.year)];
+  const anyVintage = cards.some((c) => c.year && Number(c.year) < 2000);
+  const allVintage = cards.every((c) => c.year && Number(c.year) < 2000);
+  a['Vintage']    = allVintage ? ['Yes'] : anyVintage ? ['Mixed'] : ['No'];
+  a['Graded']     = cards.some((c) => c.grader) ? ['Mixed'] : ['No'];
+  a['Language']   = ['English'];
+  a['Country/Region of Manufacture'] = ['United States'];
+  a['Autographed'] = cards.some((c) => c.notes?.toLowerCase().includes('auto')) ? ['Mixed'] : ['No'];
+  a['Number of Cards'] = [String(cards.length)];
+  return a;
+}
+
+function allSame(cards, key) {
+  const first = cards[0]?.[key];
+  return cards.every((c) => c[key] === first);
 }
