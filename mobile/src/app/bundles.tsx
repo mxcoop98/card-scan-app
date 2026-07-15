@@ -4,6 +4,7 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedInput } from '@/components/themed-input';
+import { EmptyState } from '@/components/empty-state';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
@@ -64,9 +65,11 @@ export default function BundlesScreen() {
               {data.eligible_card_count} eligible cards → {data.lot_count} lot{data.lot_count === 1 ? '' : 's'}
             </ThemedText>
             {data.lots.length === 0 && (
-              <ThemedText style={styles.empty}>
-                No lots match. Loosen the price band, or add more cheap cards.
-              </ThemedText>
+              <EmptyState
+                icon="cube-outline"
+                title="No lots match"
+                hint="Loosen the price band above, or add more cards under the max-card price."
+              />
             )}
             {data.lots.map((lot, i) => <LotCard key={i} lot={lot} onListed={load} />)}
           </ScrollView>

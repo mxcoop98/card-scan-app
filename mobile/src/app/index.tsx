@@ -5,6 +5,7 @@ import { FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'reac
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/skeleton';
 import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
@@ -101,9 +102,9 @@ export default function CardsScreen() {
               gap: gutter,
             }}
             ListEmptyComponent={
-              <ThemedText style={styles.empty}>
-                {search ? 'No matches.' : 'No cards yet. Tap “+ Add” to create one.'}
-              </ThemedText>
+              search
+                ? <EmptyState icon="search-outline" title="No matches" hint={`Nothing in your collection matches “${search}”.`} />
+                : <EmptyState icon="albums-outline" title="No cards yet" hint="Scan a card or add one manually to start tracking value." actionLabel="+ Add card" onAction={() => router.push('/cards/new')} />
             }
             renderItem={({ item }) => <CardTile card={item} width={tileWidth} />}
           />

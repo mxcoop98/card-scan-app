@@ -3,6 +3,7 @@ import { useCallback, useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -63,9 +64,13 @@ export default function ListingsScreen() {
             keyExtractor={(l) => l.id}
             contentContainerStyle={{ paddingBottom: BottomTabInset + Spacing.four, gap: Spacing.two }}
             ListEmptyComponent={
-              <ThemedText style={styles.empty}>
-                No listings yet. Create one from a bundle suggestion or a card.
-              </ThemedText>
+              <EmptyState
+                icon="pricetag-outline"
+                title="No listings yet"
+                hint="Create one from a card's detail page, or bundle cheap cards from the Bundles tab."
+                actionLabel="Browse cards"
+                onAction={() => router.push('/')}
+              />
             }
             renderItem={({ item }) => <ListingRow listing={item} />}
           />
