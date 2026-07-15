@@ -373,27 +373,46 @@ export async function publishListing({ listing, cards }) {
     },
   });
 
-  // 2. Create an offer for the item
-  const offer = await api('POST', `/sell/inventory/v1/offer`, {
-    sku,
-    marketplaceId: 'EBAY_US',
-    format: 'FIXED_PRICE',
-    availableQuantity: 1,
-    categoryId: pickCategory({ category: primary.category, isLot }),
-    pricingSummary: { price: { value: askPrice, currency: 'USD' } },
-    listingPolicies: {
-      // These IDs come from the seller's Account API. Populate via env
-      // vars (see /api/ebay/setup-sandbox-seller).
-      fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID ?? '',
-      paymentPolicyId:     process.env.EBAY_PAYMENT_POLICY_ID     ?? '',
-      returnPolicyId:      process.env.EBAY_RETURN_POLICY_ID      ?? '',
-    },
-    merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY ?? 'default',
-  });
+  // 2. Idempotent offer: if one already exists for this SKU (e.g. from
+  // a previous failed publish attempt), reuse it. Otherwise create.
+  let offerId = null;
+  let alreadyPublishedListingId = null;
+  try {
+    const existing = await api('GET', `/sell/inventory/v1/offer?sku=${encodeURIComponent(sku)}`);
+    const first = existing?.offers?.[0];
+    if (first) {
+      offerId = first.offerId;
+      // If it's already published to eBay, return the listing ID directly.
+      alreadyPublishedListingId = first.listing?.listingId ?? null;
+    }
+  } catch {
+    // 404 = no offer, that's fine
+  }
 
-  // 3. Publish the offer → get eBay listing id
-  const published = await api('POST', `/sell/inventory/v1/offer/${offer.offerId}/publish`, {});
-  const listingId = published.listingId;
+  if (!offerId) {
+    const offer = await api('POST', `/sell/inventory/v1/offer`, {
+      sku,
+      marketplaceId: 'EBAY_US',
+      format: 'FIXED_PRICE',
+      availableQuantity: 1,
+      categoryId: pickCategory({ category: primary.category, isLot }),
+      pricingSummary: { price: { value: askPrice, currency: 'USD' } },
+      listingPolicies: {
+        fulfillmentPolicyId: process.env.EBAY_FULFILLMENT_POLICY_ID ?? '',
+        paymentPolicyId:     process.env.EBAY_PAYMENT_POLICY_ID     ?? '',
+        returnPolicyId:      process.env.EBAY_RETURN_POLICY_ID      ?? '',
+      },
+      merchantLocationKey: process.env.EBAY_MERCHANT_LOCATION_KEY ?? 'default',
+    });
+    offerId = offer.offerId;
+  }
+
+  // 3. Publish (or use existing published listing)
+  let listingId = alreadyPublishedListingId;
+  if (!listingId) {
+    const published = await api('POST', `/sell/inventory/v1/offer/${offerId}/publish`, {});
+    listingId = published.listingId;
+  }
   const viewUrl = listingId ? `${hosts().listing_prefix}${listingId}` : null;
 
   await query(
@@ -408,10 +427,10 @@ export async function publishListing({ listing, cards }) {
        status = 'active',
        updated_at = now()
      WHERE id = $6`,
-    [env(), sku, offer.offerId, listingId, viewUrl, listing.id]
+    [env(), sku, offerId, listingId, viewUrl, listing.id]
   );
 
-  return { sku, offerId: offer.offerId, listingId, viewUrl, is_lot: isLot, card_count: cards.length };
+  return { sku, offerId, listingId, viewUrl, is_lot: isLot, card_count: cards.length };
 }
 
 function pickCondition({ isLot, card }) {
