@@ -1,43 +1,52 @@
+import { Ionicons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import { Pressable, StyleSheet, useColorScheme, View } from 'react-native';
 
 import { Colors, Spacing } from '@/constants/theme';
 import { ThemedText } from './themed-text';
 
-type Tab = { label: string; icon: string; path: string; match: (p: string) => boolean };
+type IconName = React.ComponentProps<typeof Ionicons>['name'];
+
+type Tab = {
+  label: string;
+  icon: IconName;
+  iconActive: IconName;
+  path: string;
+  match: (p: string) => boolean;
+};
 
 const TABS: Tab[] = [
-  { label: 'Cards',     icon: '▦', path: '/',          match: (p) => p === '/' || p.startsWith('/cards') },
-  { label: 'Bundles',   icon: '⌸', path: '/bundles',   match: (p) => p.startsWith('/bundles') },
-  { label: 'Scan',      icon: '◉', path: '/scan', match: (p) => p.startsWith('/scan') || p === '/cards/new' },
-  { label: 'Listings',  icon: '⇄', path: '/listings',  match: (p) => p.startsWith('/listings') },
-  { label: 'Portfolio', icon: '$', path: '/portfolio', match: (p) => p.startsWith('/portfolio') || p.startsWith('/explore') },
+  { label: 'Cards',     icon: 'albums-outline',    iconActive: 'albums',    path: '/',          match: (p) => p === '/' || p.startsWith('/cards') },
+  { label: 'Bundles',   icon: 'cube-outline',      iconActive: 'cube',      path: '/bundles',   match: (p) => p.startsWith('/bundles') },
+  { label: 'Scan',      icon: 'scan-outline',      iconActive: 'scan',      path: '/scan',      match: (p) => p.startsWith('/scan') || p === '/cards/new' },
+  { label: 'Listings',  icon: 'pricetag-outline',  iconActive: 'pricetag',  path: '/listings',  match: (p) => p.startsWith('/listings') },
+  { label: 'Portfolio', icon: 'trending-up-outline', iconActive: 'trending-up', path: '/portfolio', match: (p) => p.startsWith('/portfolio') || p.startsWith('/explore') || p.startsWith('/settings') },
 ];
-
-// A Settings link — surfaced from the Portfolio screen since we've hit
-// tab-bar cap of 5. Consumers reach /settings via portfolio for now.
 
 export function BottomTabBar() {
   const pathname = usePathname();
   const scheme = useColorScheme() ?? 'light';
   const colors = Colors[scheme];
+  const activeColor = '#4a9eff';
 
   return (
     <View style={[styles.bar, { backgroundColor: colors.background, borderTopColor: colors.backgroundElement }]}>
       {TABS.map((t) => {
         const active = t.match(pathname);
+        const tintColor = active ? activeColor : colors.textSecondary;
         return (
           <Pressable
             key={t.label}
             onPress={() => router.push(t.path as any)}
             style={styles.tab}>
-            <ThemedText
-              style={[styles.icon, { color: active ? colors.text : colors.textSecondary }]}>
-              {t.icon}
-            </ThemedText>
+            <Ionicons
+              name={active ? t.iconActive : t.icon}
+              size={22}
+              color={tintColor}
+            />
             <ThemedText
               type="small"
-              style={{ color: active ? colors.text : colors.textSecondary, fontWeight: active ? '600' : '400' }}>
+              style={{ color: tintColor, fontSize: 11, fontWeight: active ? '600' : '400' }}>
               {t.label}
             </ThemedText>
           </Pressable>
@@ -63,5 +72,4 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     gap: 2,
   },
-  icon: { fontSize: 22, lineHeight: 22 },
 });
