@@ -415,7 +415,9 @@ export async function publishListing({ listing, cards }) {
 }
 
 function pickCondition({ isLot, card }) {
-  if (isLot) return 'USED_VERY_GOOD';           // safe default for mixed lots
+  // eBay accepts different condition enums per category. Trading Card
+  // Mixed Lots categories reject USED_VERY_GOOD; plain USED works.
+  if (isLot) return 'USED';                     // mixed lots
   if (card.grader) return 'LIKE_NEW';           // graded singles
   return 'USED_EXCELLENT';                      // raw singles
 }
