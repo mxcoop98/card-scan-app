@@ -110,7 +110,11 @@ function CardTile({ card, width }: { card: Card; width: number }) {
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/cards/[id]', params: { id: card.id } })}
-      style={{ width }}>
+      style={({ pressed, hovered }: any) => [
+        { width, transitionDuration: '120ms', transitionProperty: 'transform, opacity' } as any,
+        hovered && { transform: [{ translateY: -2 }] },
+        pressed && { transform: [{ scale: 0.98 }], opacity: 0.9 },
+      ]}>
       <ThemedView type="backgroundElement" style={styles.tile}>
         <ThemedView style={[styles.imageBox, { aspectRatio: CARD_ASPECT }]}>
           {card.image_url ? (
@@ -126,7 +130,7 @@ function CardTile({ card, width }: { card: Card; width: number }) {
           <ThemedText type="small" numberOfLines={1}>
             {card.set_name ?? card.category}
           </ThemedText>
-          <ThemedText type="defaultSemiBold" style={{ marginTop: 2 }}>{priceText}</ThemedText>
+          <ThemedText type="defaultSemiBold" style={{ marginTop: 2, color: '#4a9eff' }}>{priceText}</ThemedText>
         </ThemedView>
       </ThemedView>
     </Pressable>

@@ -73,19 +73,33 @@ function ListingRow({ listing }: { listing: Listing }) {
     listing.cards.length === 1
       ? listing.cards[0].name
       : `${listing.cards.length} cards`;
+  const statusColors: Record<string, string> = {
+    draft: '#94a3b8', active: '#4a9eff', sold: '#22c55e', ended: '#94a3b8',
+  };
+  const statusColor = statusColors[listing.status] ?? '#94a3b8';
 
   return (
-    <Pressable onPress={() => router.push({ pathname: '/listings/[id]', params: { id: listing.id } })}>
+    <Pressable
+      onPress={() => router.push({ pathname: '/listings/[id]', params: { id: listing.id } })}
+      style={({ pressed, hovered }: any) => [
+        { transitionDuration: '120ms', transitionProperty: 'transform, opacity' } as any,
+        hovered && { transform: [{ translateY: -1 }] },
+        pressed && { transform: [{ scale: 0.99 }], opacity: 0.9 },
+      ]}>
       <ThemedView type="backgroundElement" style={styles.row}>
-        <ThemedView style={{ flex: 1, backgroundColor: 'transparent' }}>
+        <ThemedView style={{ flex: 1, backgroundColor: 'transparent', gap: 2 }}>
           <ThemedText type="defaultSemiBold">
             {listing.title ?? cardsLabel}
           </ThemedText>
-          <ThemedText type="small">
-            {listing.status} · {cardsLabel} · {listing.marketplace}
-          </ThemedText>
+          <ThemedView style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'transparent' }}>
+            <ThemedView style={[styles.statusDot, { backgroundColor: statusColor }]} />
+            <ThemedText type="small" style={{ textTransform: 'uppercase', fontSize: 11, letterSpacing: 0.5, color: statusColor }}>
+              {listing.status}
+            </ThemedText>
+            <ThemedText type="small" style={{ opacity: 0.6 }}>· {cardsLabel} · {listing.marketplace}</ThemedText>
+          </ThemedView>
         </ThemedView>
-        <ThemedText type="defaultSemiBold">{priceLabel}</ThemedText>
+        <ThemedText type="defaultSemiBold" style={isSold ? { color: '#22c55e' } : null}>{priceLabel}</ThemedText>
       </ThemedView>
     </Pressable>
   );
@@ -108,6 +122,11 @@ const styles = StyleSheet.create({
     padding: Spacing.three,
     borderRadius: Spacing.three,
     alignItems: 'center',
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 999,
   },
   empty: { textAlign: 'center', marginTop: Spacing.four, opacity: 0.6 },
   error: { color: '#ff5555' },
