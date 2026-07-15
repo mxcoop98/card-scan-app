@@ -1,9 +1,10 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { Skeleton } from '@/components/skeleton';
 import { Sparkline } from '@/components/sparkline';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -40,7 +41,25 @@ export default function PortfolioScreen() {
         <ScrollView contentContainerStyle={{ padding: Spacing.four, gap: Spacing.three, paddingBottom: BOTTOM_TAB_HEIGHT + Spacing.four }}>
           <ThemedText type="title">Portfolio</ThemedText>
           {error && <ThemedText style={styles.error}>{error}</ThemedText>}
-          {!data && !error && <ActivityIndicator />}
+          {!data && !error && (
+            <View style={{ gap: Spacing.three }}>
+              <ThemedView type="backgroundElement" style={styles.hero}>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Skeleton width={100} height={12} radius={4} />
+                  <Skeleton width={180} height={36} radius={6} />
+                  <Skeleton width={140} height={12} radius={4} />
+                </View>
+                <Skeleton width={140} height={64} radius={6} />
+              </ThemedView>
+              {[0, 1, 2].map((i) => (
+                <ThemedView key={i} type="backgroundElement" style={styles.card}>
+                  <Skeleton width={100} height={14} radius={4} />
+                  <Skeleton width="80%" height={12} radius={4} />
+                  <Skeleton width="60%" height={12} radius={4} />
+                </ThemedView>
+              ))}
+            </View>
+          )}
 
           {data && (
             <>

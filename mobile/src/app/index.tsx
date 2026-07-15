@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import { FlatList, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { Skeleton } from '@/components/skeleton';
 import { ThemedInput } from '@/components/themed-input';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -75,7 +76,17 @@ export default function CardsScreen() {
         />
 
         {error && <ThemedText style={styles.error}>{error}</ThemedText>}
-        {filtered == null && !error && <ActivityIndicator style={{ marginTop: Spacing.four }} />}
+        {filtered == null && !error && (
+          <View style={{ paddingHorizontal: outerPad, gap: gutter, flexDirection: 'row', flexWrap: 'wrap' }}>
+            {Array.from({ length: cols * 2 }).map((_, i) => (
+              <View key={i} style={{ width: tileWidth }}>
+                <Skeleton height={tileWidth / CARD_ASPECT} radius={Spacing.two} />
+                <Skeleton width="70%" height={14} radius={4} style={{ marginTop: 8 }} />
+                <Skeleton width="50%" height={12} radius={4} style={{ marginTop: 6 }} />
+              </View>
+            ))}
+          </View>
+        )}
 
         {filtered && (
           <FlatList

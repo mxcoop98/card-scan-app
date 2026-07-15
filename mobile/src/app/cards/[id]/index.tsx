@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { Skeleton } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -95,7 +96,15 @@ export default function CardDetail() {
         <ScrollView contentContainerStyle={{ padding: Spacing.four, paddingBottom: BOTTOM_TAB_HEIGHT + Spacing.four, gap: Spacing.three }}>
           <BackRow />
 
-          {!card && !error && <ActivityIndicator />}
+          {!card && !error && (
+            <View style={{ gap: Spacing.three, alignItems: 'center' }}>
+              <Skeleton width={imageWidth} height={imageWidth / CARD_ASPECT} radius={12} />
+              <Skeleton width={160} height={12} radius={4} />
+              <Skeleton width={220} height={28} radius={6} />
+              <Skeleton width="100%" height={110} radius={12} />
+              <Skeleton width="100%" height={180} radius={12} />
+            </View>
+          )}
           {error && <ThemedText style={styles.error}>{error}</ThemedText>}
 
           {card && (

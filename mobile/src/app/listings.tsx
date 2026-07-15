@@ -1,8 +1,9 @@
 import { Stack, router, useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet } from 'react-native';
+import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Skeleton } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, Spacing } from '@/constants/theme';
@@ -43,7 +44,19 @@ export default function ListingsScreen() {
         </ThemedView>
 
         {error && <ThemedText style={styles.error}>{error}</ThemedText>}
-        {rows == null && !error && <ActivityIndicator />}
+        {rows == null && !error && (
+          <View style={{ gap: Spacing.two }}>
+            {[0, 1, 2].map((i) => (
+              <ThemedView key={i} type="backgroundElement" style={styles.row}>
+                <View style={{ flex: 1, gap: 6 }}>
+                  <Skeleton width="70%" height={14} radius={4} />
+                  <Skeleton width="50%" height={12} radius={4} />
+                </View>
+                <Skeleton width={70} height={16} radius={4} />
+              </ThemedView>
+            ))}
+          </View>
+        )}
         {rows && (
           <FlatList
             data={rows}
