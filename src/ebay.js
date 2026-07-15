@@ -102,10 +102,14 @@ export async function accessToken() {
 
 async function refreshAccessToken(row) {
   const { id, secret } = requireCreds();
+  // Deliberately omit `scope` from the refresh body. eBay reuses the
+  // scopes originally granted to this refresh_token. Passing our
+  // current env scope list would fail with invalid_scope if the user
+  // has added scopes to EBAY_SCOPES since the last consent (which
+  // would require a full re-authorize, not just a refresh).
   const body = new URLSearchParams({
     grant_type: 'refresh_token',
     refresh_token: row.refresh_token,
-    scope: scopes(),
   });
   const res = await fetch(hosts().token, {
     method: 'POST',
