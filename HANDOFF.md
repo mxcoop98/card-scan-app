@@ -1,9 +1,10 @@
 # Card Tracker — Handoff
 
 Onboarding doc so any new session (Claude Code or human) can pick this up cleanly.
-Written 2026-07-09, updated 2026-07-14 (eBay integration shipped to Railway sandbox).
+Written 2026-07-09; updated 2026-07-14 (eBay singles published); 2026-07-15 (UI polish
++ grade pill selector); 2026-07-16 (multi-card lot publishing + idempotent recovery).
 
-## Deployed state (as of 2026-07-14)
+## Deployed state (as of 2026-07-16)
 
 - **Backend live on Railway**: https://card-scan-app-production.up.railway.app
   - Postgres provisioned as sibling Railway service, wired via literal `DATABASE_URL`
@@ -15,8 +16,12 @@ Written 2026-07-09, updated 2026-07-14 (eBay integration shipped to Railway sand
 - **eBay OAuth**: connected via sandbox test user, all 4 scopes granted
   (`api_scope` + `sell.inventory` + `sell.account` + `sell.fulfillment`).
   Access token 2hr, refresh token 18mo (auto-refresh on demand).
-- **First real publish confirmed 2026-07-14**: Charizard listed at sandbox eBay listing
-  ID `110589912281`, view URL `https://sandbox.ebay.com/itm/110589912281`.
+- **Two real publishes confirmed:**
+  - 2026-07-14: Single-card Charizard → sandbox listing `110589912281`
+    (`https://sandbox.ebay.com/itm/110589912281`).
+  - 2026-07-16: 3-card lot (Pikachu / Squirtle / Poliwrath) → sandbox listing
+    `110589927694` (`https://sandbox.ebay.com/itm/110589927694`), category
+    Pokémon Mixed Card Lots (183456), condition `NEW`, $50 ask.
 
 ## GitHub
 
@@ -45,6 +50,7 @@ card-scan-app/
 │   ├── recognition.js       # Recognition provider abstraction (hint search v1)
 │   ├── grading.js           # ROI engine (pure function)
 │   ├── bundling.js          # Bundle-suggestion engine (pure function)
+│   ├── ebay.js              # OAuth + Sell API wrapper (single + lot publish)
 │   └── refresh-all.js       # Daily price snapshot job (Railway cron)
 ├── schema.sql               # cards, price_history, listings, grading_*, listing_cards
 ├── docker-compose.yml       # Local Postgres 16
@@ -63,10 +69,16 @@ card-scan-app/
 │   │   │   ├── listings.tsx
 │   │   │   ├── listings/[id].tsx        # Detail + mark-sold form
 │   │   │   ├── portfolio.tsx            # Total value + sparkline
-│   │   │   └── scan.tsx                 # Photo capture + hint search
+│   │   │   ├── scan.tsx                 # Photo capture + hint search
+│   │   │   └── settings.tsx             # eBay Connect + Sync buttons
 │   │   ├── components/
-│   │   │   ├── bottom-tab-bar.tsx       # Custom 5-tab bar
-│   │   │   └── sparkline.tsx            # SVG line chart
+│   │   │   ├── bottom-tab-bar.tsx       # Custom 5-tab bar (Ionicons)
+│   │   │   ├── sparkline.tsx            # SVG line chart (needs react-native-svg)
+│   │   │   ├── skeleton.tsx             # Pulsing grey block loader
+│   │   │   ├── empty-state.tsx          # Icon ring + title + hint + CTA
+│   │   │   ├── themed-input.tsx         # Theme-aware TextInput (light/dark)
+│   │   │   ├── themed-text.tsx
+│   │   │   └── themed-view.tsx          # backgroundElement type = elevated card
 │   │   └── lib/
 │   │       ├── api.ts                   # Typed fetch wrapper for the backend
 │   │       └── confirm.ts               # Cross-platform confirm() (web uses window.confirm)
@@ -130,7 +142,9 @@ Grading: `GET /api/grading-services`, `POST /api/grading-services`,
 Bundles: `GET /api/bundle-suggestions?max_card_price&min_bundle_value&max_bundle_value&markup&group_by`.
 
 Listings: `GET/POST /api/listings`, `GET /api/listings/:id`,
-`POST /api/listings/:id/mark-sold`, `DELETE /api/listings/:id`.
+`POST /api/listings/:id/mark-sold`, `DELETE /api/listings/:id`,
+`POST /api/listings/:id/publish-ebay` (single-card OR lot),
+`POST /api/listings/:id/ebay-reset` (delete stale eBay offer/inventory to unstick a failed publish).
 
 Portfolio: `GET /api/portfolio/summary`, `GET /api/portfolio/timeseries`.
 
@@ -150,7 +164,13 @@ eBay:
   fulfillment/payment/return policies. Returns the IDs to plug into env.
 - `POST /api/ebay/sync-orders?lookback_days=30` — pull recent orders,
   match to `listings.ebay_listing_id`, mark sold with real price/fees/shipping.
-- `POST /api/listings/:id/publish-ebay` — v1: single-card only.
+  **Sandbox limitation**: returns 403 for sandbox test users (no seller verification).
+  Works in production.
+- `POST /api/listings/:id/publish-ebay` — single card OR multi-card lot. Idempotent
+  (reuses existing offer for the SKU if a previous attempt got stuck).
+- `POST /api/listings/:id/ebay-reset` — delete eBay-side offer + inventory for the
+  listing's SKU (`ct-{listing_id}`). Use when a publish attempt got stuck with a
+  stale offer state that keeps rejecting retries.
 
 Health: `GET /health`.
 
@@ -256,38 +276,95 @@ new scope requires a fresh consent flow (not a refresh). If you add a scope to
 `EBAY_SCOPES` and try to use it, you'll get `invalid_scope` from the token
 refresh endpoint. Fix: click Reconnect eBay in the app, do the OAuth flow again,
 copy the new code, exchange.
+
+### 11. Do NOT send `scope` on refresh_token grant
+
+`refreshAccessToken` in `ebay.js` omits the `scope` param intentionally. eBay's
+docs say scope is optional on refresh and defaults to the originally-granted
+scopes. Passing our current `EBAY_SCOPES` fails with `invalid_scope` if the env
+has been widened since the last consent (which happens every time we add a
+Sell-API scope). Leave it off.
+
+### 12. Multi-card lot publishing — condition + category quirks
+
+Lot publishing lives on the same `publishListing()` — pass N cards, it detects
+`isLot`. Behaviors:
+
+- **Category ID**: Pokémon Mixed Card Lots (`183456`), Sports Mixed Card Lots
+  (`261328`). Singles use `183454` / `212`.
+- **Condition enum**: Pokémon Mixed Card Lots is oddly restrictive. Only `NEW`
+  was accepted in sandbox. `USED_VERY_GOOD`, `USED_GOOD`, `LIKE_NEW`, and plain
+  `USED` all returned errorId 25021 ("condition id is invalid for category"). If
+  you extend to more lot categories, expect to have to trial-and-error the
+  condition.
+- **Aspects**: `Type='Card Lot'`, `Number of Cards` filled from card count,
+  `Vintage`/`Graded`='Mixed' when the lot spans states, common set/year surfaced
+  only when all cards share them.
+- **Title**: honors `listing.title` when set (up to 80 chars, eBay's limit).
+  Otherwise composed from common set/year + card count.
+- **Description**: enumerates every card in the lot with meta.
+- **Images**: passes all cards' `image_url` (up to 24, eBay's limit).
+
+### 13. Publish is idempotent — reuse existing offer for SKU
+
+`publishListing()` now queries `/sell/inventory/v1/offer?sku=ct-{listing.id}`
+first. If an offer exists it reuses the `offerId` instead of creating a new one
+(which would fail with "Offer entity already exists"). If the existing offer is
+already published, returns the existing `listingId` immediately.
+
+Failed publish attempts can leave the eBay-side inventory item + offer in a bad
+state that keeps rejecting retries (e.g. stuck on an invalid category/condition
+combo from the initial attempt). Use `POST /api/listings/:id/ebay-reset` to
+force-delete the offer + inventory item and start fresh. Idempotent — safe to
+call even when nothing is stuck.
 ```
 
 ## What's built vs not
 
 **Done:**
-- Backend REST API (all endpoints above), migrations, seed data (18 test cards with real images).
-- Frontend: cards grid, card detail (big image + big price + comps table), add card, grading
-  analysis screen, bundles, listings + mark-sold, portfolio + sparkline, scan (v1 hint search).
-- Bottom tab bar (Cards / Bundles / Scan / Listings / Portfolio).
-- Custom lib/confirm.ts because `Alert.alert` is a no-op on web.
+- Backend REST API (all endpoints above), migrations, seed data.
+- Frontend: cards grid, card detail (big image + big price + comps table +
+  **grade pill selector RAW/PSA/BGS/SGC**), add card, grading analysis,
+  bundles, listings + mark-sold, portfolio + **sparkline**, scan (v1 hint
+  search + native camera path), settings (eBay connect + sync).
+- Bottom tab bar (Cards / Bundles / Scan / Listings / Portfolio) with
+  **Ionicons** from `@expo/vector-icons`.
+- **UI polish**: card panels elevated via themed-view, hover/press feedback on
+  card tiles + listing rows, colored status dots on listings, skeleton loaders
+  everywhere (Cards, Portfolio, Listings, Card Detail), reusable EmptyState
+  component (Cards, Listings, Bundles).
+- Custom `lib/confirm.ts` (web uses `window.confirm`), `themed-input.tsx`
+  (light/dark aware — the previous hardcoded-white bug that broke input
+  visibility on light mode).
 - Portfolio timeseries (daily portfolio USD value from price_history).
 - Pricing provider auto-backfills `image_url` + `external_ids` on price fetch.
+- **eBay integration** (Railway sandbox, all 4 scopes): OAuth flow, one-shot
+  sandbox seller provisioner (Business Policies opt-in + merchant location +
+  fulfillment/payment/return policies), single-card publish, multi-card lot
+  publish (idempotent, with `ebay-reset` recovery endpoint), order sync
+  (code done — sandbox-blocked, works in production).
 
 **Not built (roadmap):**
-1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is hint search.
-   Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider when we're ready to pay.
-2. **eBay integration — v2 shipped 2026-07-14**. OAuth + publish single-card + auto-provision
-   sandbox seller + order sync (production-only, blocked in sandbox). Still todo:
-   multi-card lot listings, RuName redirect fix (currently requires manual code copy),
-   scheduled order-sync cron, production seller onboarding, category/aspect polish.
-3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings, Card Ladder,
-   SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate one — present tradeoffs.
-4. **Sports variant discovery** — the `/api/variants` endpoint returns empty for sports
-   because we don't have a sports card DB. Same fix as sports pricing.
-5. **PSA API for grading** — auto-populate graded price estimates + Pop Report probabilities.
-6. **Front + back card images**, **grade pill selector** (RAW/PSA/BGS/SGC filters comps),
-   proper vector tab icons, animations.
-7. **Native camera** for /scan (currently web file-input only).
-8. **Portfolio sparkline** — was originally built but appears to have been overwritten
-   (portfolio.tsx currently lacks the SVG line chart). `src/components/sparkline.tsx`
-   still exists and `GET /api/portfolio/timeseries` still works — just needs to be
-   wired back into the portfolio screen.
+1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is
+   hint search. Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider
+   when ready to pay.
+2. **eBay v3 items still todo**: RuName redirect fix (currently requires
+   manual code copy after every OAuth), scheduled order-sync cron (Railway
+   cron service pointing at `POST /api/ebay/sync-orders`), production seller
+   onboarding, more polished title / aspect logic per category.
+3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings,
+   Card Ladder, SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate
+   one — present tradeoffs.
+4. **Sports variant discovery** — the `/api/variants` endpoint returns empty for
+   sports because we don't have a sports card DB. Same fix as sports pricing.
+5. **PSA API for grading** — auto-populate graded price estimates + Pop Report
+   probabilities so the grade pill selector fills in without manual entry.
+6. **Front + back card images** — schema addition (`image_url_back`), dual
+   image display on card detail, back-capture in scan.
+7. **Native camera in dev build / Expo Go** — `scan.tsx` has the
+   `expo-image-picker` path but it only fires when the app runs through Expo
+   Go or a dev build. Mobile web still uses the file-input `capture="environment"`
+   flow which already opens the phone camera.
 
 ## Gotchas we've hit (so you don't waste a session on them)
 
@@ -305,6 +382,16 @@ copy the new code, exchange.
 - **PokemonTCG.io** returns 404 under sustained unauthenticated load. Get a free key and
   put it in `.env` as `POKEMONTCG_API_KEY` for less flakiness.
 - **`node_modules`** is 700+MB. Don't commit. Already in `.gitignore`.
+- **`@expo/vector-icons` install can leave partial internals** — if you install it
+  and get `Unable to resolve module ./createIconSet`, run a full `npm install` from
+  the mobile/ dir to complete the dep tree. Then restart Metro with `--clear`.
+- **`react-native-svg` isn't in the base template** — needed for the portfolio
+  sparkline. Install via `NODE_TLS_REJECT_UNAUTHORIZED=0 npx expo install react-native-svg`
+  on TLS-intercepted networks.
+- **Metro's `CI=1` disables the file watcher** — every code change requires a full
+  Metro restart to take effect. Run Metro *without* `CI=1` for hot reload during
+  active dev; use `CI=1` only when running Metro as a long-lived background process
+  and you'll be restarting manually anyway.
 
 ## Architecture decisions (do not second-guess)
 
