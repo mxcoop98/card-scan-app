@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import crypto from 'node:crypto';
 import 'dotenv/config';
 import { query } from './db.js';
 import { fetchPrices } from './pricing.js';
@@ -642,6 +643,69 @@ app.post('/api/ebay/sync-orders', async (req, res) => {
     res.json(await ebay.syncOrders({ lookbackDays: days }));
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================
+// eBay Marketplace Account Deletion / Closure Notification
+// ============================================================
+// Compliance requirement for production keysets. Two behaviors on
+// the same path:
+//
+//   GET  ?challenge_code=X → return {challengeResponse: sha256(challenge_code + verification_token + endpoint)}
+//   POST                    → receive user-deletion payloads, log, 200
+//
+// Set EBAY_DELETION_VERIFICATION_TOKEN in Railway to a random string
+// (32-80 alphanumeric chars). Then paste the SAME string into eBay
+// Developer Console → Alerts and Notifications → Marketplace Account
+// Deletion → alongside the endpoint URL. eBay hits GET with a challenge,
+// verifies our response matches its own SHA256 calc, and marks the
+// app compliant.
+const ACCOUNT_DELETION_PATH = '/api/ebay/account-deletion-notification';
+
+app.get(ACCOUNT_DELETION_PATH, (req, res) => {
+  const challengeCode = req.query.challenge_code;
+  const token = process.env.EBAY_DELETION_VERIFICATION_TOKEN;
+  if (!challengeCode) return res.status(400).json({ error: 'missing challenge_code' });
+  if (!token)         return res.status(500).json({ error: 'EBAY_DELETION_VERIFICATION_TOKEN not set on server' });
+  const endpoint = `${req.protocol}://${req.get('host')}${ACCOUNT_DELETION_PATH}`;
+  const hash = crypto.createHash('sha256');
+  hash.update(String(challengeCode));
+  hash.update(token);
+  hash.update(endpoint);
+  res.set('Content-Type', 'application/json');
+  res.json({ challengeResponse: hash.digest('hex') });
+});
+
+app.post(ACCOUNT_DELETION_PATH, async (req, res) => {
+  // eBay sends: { metadata: {...}, notification: { data: { username, userId, eiasToken, ... }, ... } }
+  // We don't currently track eBay users per-account — a real deletion
+  // is a signal we might want to invalidate stored OAuth tokens if the
+  // seller matches. Log everything for audit; more downstream logic
+  // can grow here.
+  try {
+    const payload = req.body ?? {};
+    const username = payload?.notification?.data?.username ?? null;
+    console.log('[ebay account deletion]', {
+      username,
+      notificationId: payload?.metadata?.notificationId ?? null,
+      raw: JSON.stringify(payload).slice(0, 500),
+    });
+    // If our currently-connected seller matches, wipe their tokens.
+    if (username) {
+      const t = await query('SELECT seller_username FROM ebay_tokens');
+      const match = t.rows.find((r) => r.seller_username && r.seller_username.toLowerCase() === username.toLowerCase());
+      if (match) {
+        await query('DELETE FROM ebay_tokens WHERE seller_username = $1', [match.seller_username]);
+        console.log('[ebay account deletion] revoked tokens for', match.seller_username);
+      }
+    }
+    res.status(200).json({ received: true });
+  } catch (e) {
+    console.error('[ebay account deletion] handler error:', e);
+    // Return 200 anyway — retries won't help and eBay will disable the
+    // endpoint if we 500 too often.
+    res.status(200).json({ received: true, note: 'handler errored, see logs' });
   }
 });
 
