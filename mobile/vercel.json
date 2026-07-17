@@ -3,12 +3,7 @@
   "buildCommand": "npx expo export -p web",
   "outputDirectory": "dist",
   "installCommand": "npm install",
-  "cleanUrls": true,
-  "trailingSlash": false,
   "rewrites": [
-    { "source": "/cards/:id/grading", "destination": "/cards/[id]/grading.html" },
-    { "source": "/cards/:id",         "destination": "/cards/[id].html" },
-    { "source": "/listings/:id",      "destination": "/listings/[id].html" },
-    { "source": "/(.*)",              "destination": "/index.html" }
+    { "source": "/((?!_expo|assets|favicon\\.ico|robots\\.txt).*)", "destination": "/index.html" }
   ]
 }
