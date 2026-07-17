@@ -1,8 +1,9 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Card Tracker",
+    "slug": "card-tracker",
     "version": "1.0.0",
+    "description": "Personal Pokémon and sports card tracking — scan, catalog, grade, bundle, list to eBay.",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "mobile",
@@ -21,7 +22,19 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "name": "Card Tracker",
+      "shortName": "Cards",
+      "themeColor": "#4a9eff",
+      "backgroundColor": "#ffffff",
+      "meta": {
+        "description": "Personal Pokémon and sports card tracking — scan, catalog, grade, bundle, list to eBay.",
+        "og:title": "Card Tracker",
+        "og:description": "Scan cards, track value over time, calculate grading ROI, bundle low-value cards into lots, publish to eBay.",
+        "og:type": "website",
+        "og:url": "https://card-scan-app.vercel.app",
+        "twitter:card": "summary"
+      }
     },
     "plugins": [
       "expo-router",

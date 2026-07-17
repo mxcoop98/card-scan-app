@@ -69,6 +69,12 @@ export default function CardsScreen() {
           </Pressable>
         </ThemedView>
 
+        <ThemedView style={styles.demoBanner}>
+          <ThemedText type="small" style={styles.demoBannerText}>
+            🧪  Demo · shared sandbox — feel free to click around, add cards, break things.
+          </ThemedText>
+        </ThemedView>
+
         <ThemedInput
           value={search}
           onChangeText={setSearch}
@@ -173,6 +179,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.two,
     fontSize: 15,
   },
+  demoBanner: {
+    marginHorizontal: Spacing.four,
+    marginBottom: Spacing.two,
+    paddingVertical: 8,
+    paddingHorizontal: Spacing.three,
+    borderRadius: Spacing.two,
+    backgroundColor: 'rgba(74,158,255,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74,158,255,0.3)',
+  },
+  demoBannerText: { opacity: 0.85 },
   tile: {
     borderRadius: Spacing.three,
     padding: 6,
