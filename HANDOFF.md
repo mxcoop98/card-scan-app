@@ -2,17 +2,25 @@
 
 Onboarding doc so any new session (Claude Code or human) can pick this up cleanly.
 Written 2026-07-09; updated 2026-07-14 (eBay singles published); 2026-07-15 (UI polish
-+ grade pill selector); 2026-07-16 (multi-card lot publishing + idempotent recovery).
++ grade pill selector); 2026-07-16 (multi-card lot publishing + idempotent recovery);
+2026-07-17 (frontend deployed to Vercel — app is now public).
 
-## Deployed state (as of 2026-07-16)
+## Deployed state (as of 2026-07-17)
 
+- **Frontend live on Vercel**: **https://card-scan-app.vercel.app** ← share this URL.
+  - Static export of the Expo web build; Vercel auto-deploys off GitHub `main`.
+  - Env var set in Vercel dashboard: `EXPO_PUBLIC_API_URL` points at Railway backend.
+  - `mobile/vercel.json` — buildCommand + outputDirectory + a single catchall
+    rewrite. Static routes (`/portfolio`, `/settings`, etc.) served by filename;
+    dynamic routes (`/cards/:id`, `/listings/:id`, `/cards/:id/grading`) fall
+    through to `/index.html` for client-side hydration.
+  - Deployment Protection is off so the production URL is public.
 - **Backend live on Railway**: https://card-scan-app-production.up.railway.app
   - Postgres provisioned as sibling Railway service, wired via literal `DATABASE_URL`
     (not the `${{Postgres.DATABASE_URL}}` reference — that gave us circular issues).
   - Railway networking port set to **8080** (matches what `process.env.PORT` gives Node
     on Railway; do NOT change to 3000 without adding a `PORT=3000` env var too).
-- **Frontend still runs locally** (`mobile/.env` has `EXPO_PUBLIC_API_URL` pointing at
-  Railway). Both desktop and phone browsers hit Railway.
+  - `app.use(cors())` allows all origins — Vercel calls work without any config.
 - **eBay OAuth**: connected via sandbox test user, all 4 scopes granted
   (`api_scope` + `sell.inventory` + `sell.account` + `sell.fulfillment`).
   Access token 2hr, refresh token 18mo (auto-refresh on demand).
@@ -25,7 +33,8 @@ Written 2026-07-09; updated 2026-07-14 (eBay singles published); 2026-07-15 (UI 
 
 ## GitHub
 
-`https://github.com/mxcoop98/card-scan-app` — Railway auto-deploys off `main`.
+`https://github.com/mxcoop98/card-scan-app` — **both Railway and Vercel** auto-deploy
+off `main`. One push → both platforms rebuild in ~90 sec each.
 
 ## What it is
 
@@ -319,6 +328,61 @@ force-delete the offer + inventory item and start fresh. Idempotent — safe to
 call even when nothing is stuck.
 ```
 
+## Vercel frontend deploy — LESSONS LEARNED
+
+### Setup (already done, documented here for repro)
+
+1. https://vercel.com → **Add New Project** → import `mxcoop98/card-scan-app`.
+2. **Root Directory: `mobile`** (this is the make-or-break setting — Vercel
+   defaults to repo root and fails to detect Expo without this).
+3. Framework Preset: **Other** (Expo web isn't in Vercel's auto-detect list).
+4. Build / Install / Output are all defined in `mobile/vercel.json` so the UI
+   fields can be left alone.
+5. **Env vars** → add `EXPO_PUBLIC_API_URL=https://card-scan-app-production.up.railway.app`.
+   `EXPO_PUBLIC_*` vars are baked into the JS bundle at build time.
+6. Deploy.
+7. Settings → **Deployment Protection** → set to **None** (or "Only Production")
+   so preview URLs and the production URL are publicly accessible without a
+   Vercel login.
+
+### The one vercel.json that works
+
+Multiple rewrites + `cleanUrls: true` + `trailingSlash: false` fought each other
+— dynamic routes 404'd before the rewrite fired. What works, at
+`mobile/vercel.json`:
+
+```json
+{
+  "buildCommand": "npx expo export -p web",
+  "outputDirectory": "dist",
+  "installCommand": "npm install",
+  "rewrites": [
+    { "source": "/((?!_expo|assets|favicon\\.ico|robots\\.txt).*)", "destination": "/index.html" }
+  ]
+}
+```
+
+The negative-lookahead pattern excludes asset paths from the catchall so JS/CSS
+bundles serve directly from `dist/_expo/...`. Every other path falls through to
+`/index.html` and Expo Router hydrates the correct screen from `window.location`.
+Static routes (`/portfolio`, `/settings`, etc.) still get their pre-rendered
+HTML because Vercel checks for a matching file BEFORE running rewrites — a
+`.html` file with the same name wins.
+
+Do NOT re-add `cleanUrls: true` or per-route explicit rewrites — both broke
+dynamic routing in testing.
+
+### Production URL vs preview URLs
+
+Vercel gives every deployment three URLs:
+- `card-scan-app.vercel.app` — canonical production (public). **Use this one to share.**
+- `card-scan-app-git-main-card-scan-app.vercel.app` — branch alias (still SSO-gated).
+- `card-scan-omfxp0zrd-...vercel.app` — per-commit preview (still SSO-gated).
+
+The disable-Deployment-Protection setting above makes ALL three public. Currently
+only the canonical production URL is fully public.
+```
+
 ## What's built vs not
 
 **Done:**
@@ -343,6 +407,11 @@ call even when nothing is stuck.
   fulfillment/payment/return policies), single-card publish, multi-card lot
   publish (idempotent, with `ebay-reset` recovery endpoint), order sync
   (code done — sandbox-blocked, works in production).
+- **Frontend deployed to Vercel** (`https://card-scan-app.vercel.app`) via a
+  static Expo web export. Auto-deploys from GitHub `main`. Env var
+  `EXPO_PUBLIC_API_URL` set in Vercel dashboard points at Railway backend.
+  `mobile/vercel.json` uses a negative-lookahead catchall rewrite so dynamic
+  routes hydrate correctly. Deployment Protection is off for public access.
 
 **Not built (roadmap):**
 1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is
@@ -392,6 +461,12 @@ call even when nothing is stuck.
   Metro restart to take effect. Run Metro *without* `CI=1` for hot reload during
   active dev; use `CI=1` only when running Metro as a long-lived background process
   and you'll be restarting manually anyway.
+- **Vercel Deployment Protection is on by default** — preview URLs 302 to Vercel's
+  SSO login. Kill it in Project Settings → Deployment Protection → None. Otherwise
+  strangers can't view the app.
+- **Vercel Root Directory defaults to repo root** — for our monorepo shape (mobile/
+  under root) you MUST set Root Directory = `mobile` at project import time. Miss
+  this and the build fails to find package.json.
 
 ## Architecture decisions (do not second-guess)
 
