@@ -59,6 +59,17 @@ export default function NewCard() {
           </Pressable>
         </ThemedView>
 
+        {category === 'sports' && (
+          <ThemedView style={styles.notice}>
+            <ThemedText type="small">
+              You can still catalog sports cards, but automatic pricing isn&apos;t
+              wired up yet (needs a data source pick — eBay sold-listings /
+              Card Ladder / SportsCardsPro). The card will save with a null
+              market value until then.
+            </ThemedText>
+          </ThemedView>
+        )}
+
         <Field label="Name *" value={name} onChangeText={setCardName} placeholder="Charizard" />
         <Field label="Set" value={setName} onChangeText={setSetName} placeholder="Base Set" />
         <Field label="Card number" value={cardNumber} onChangeText={setCardNumber} placeholder="4/102" />
@@ -124,4 +135,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#4a9eff',
   },
   error: { color: '#ff5555' },
+  notice: {
+    padding: Spacing.three,
+    borderRadius: Spacing.two,
+    backgroundColor: 'rgba(255,176,32,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,176,32,0.3)',
+  },
 });

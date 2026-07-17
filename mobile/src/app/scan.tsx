@@ -134,7 +134,22 @@ export default function ScanScreen() {
             <CameraCapture onCapture={setCaptured} hasCaptured={!!captured} />
           </ThemedView>
 
-          {stage.kind === 'input' && (
+          {stage.kind === 'input' && category === 'sports' && (
+            <ThemedView type="backgroundElement" style={styles.comingSoon}>
+              <ThemedText type="defaultSemiBold">Sports scan — coming soon</ThemedText>
+              <ThemedText type="small" style={{ opacity: 0.75 }}>
+                Sports card recognition isn&apos;t wired up yet. Unlike Pokémon
+                (which has a clean free API), sports pricing needs a data
+                source decision — eBay sold-listings, Card Ladder, or
+                SportsCardsPro — each with real tradeoffs.
+              </ThemedText>
+              <ThemedText type="small" style={{ opacity: 0.75 }}>
+                Switch back to Pokémon above to try the scan flow.
+              </ThemedText>
+            </ThemedView>
+          )}
+
+          {stage.kind === 'input' && category === 'pokemon' && (
             <>
               <ThemedText type="small" style={{ opacity: 0.7 }}>
                 Add any details you can read off the card. Even one field helps a lot.
@@ -446,4 +461,9 @@ const styles = StyleSheet.create({
   image: { width: '100%', height: '100%' },
   placeholder: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
   error: { color: '#ff5555' },
+  comingSoon: {
+    padding: Spacing.three,
+    borderRadius: Spacing.three,
+    gap: Spacing.two,
+  },
 });
