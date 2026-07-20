@@ -317,6 +317,11 @@ export const api = {
   // eBay
   ebayStatus: () => req<EbayStatus>('/api/ebay/status'),
   ebayAuthorizeUrl: (state?: string) => req<{ url: string }>(`/api/ebay/authorize-url${qs({ state })}`),
+  ebayCompleteAuth: (input: string) =>
+    req<{ ok: boolean; status: EbayStatus }>('/api/ebay/complete-auth', {
+      method: 'POST',
+      body: JSON.stringify({ input }),
+    }),
   publishToEbay: (listingId: string) =>
     req<{ sku: string; offerId: string; listingId: string; viewUrl: string }>(
       `/api/listings/${listingId}/publish-ebay`,

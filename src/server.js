@@ -615,6 +615,50 @@ app.get('/api/ebay/callback', async (req, res) => {
   }
 });
 
+// Pull an OAuth authorization code out of whatever the user pastes:
+// the full eBay redirect URL, a bare `code=...` fragment, or just the
+// code value. eBay codes are URL-encoded in the redirect; searchParams
+// and decodeURIComponent give us the decoded form exchangeCode wants
+// (exchangeCode re-encodes it in the token request body).
+function extractEbayCode(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+  if (!s) return null;
+  // Full URL — let the URL parser decode the code param for us.
+  if (s.startsWith('http')) {
+    try {
+      const c = new URL(s).searchParams.get('code');
+      if (c) return c;
+    } catch { /* not a parseable URL, fall through */ }
+  }
+  // A `code=...` fragment pasted without the scheme.
+  const m = s.match(/[?&]?code=([^&\s]+)/);
+  if (m) return decodeURIComponent(m[1]);
+  // Bare code. Decode only if it looks percent-encoded (a decoded eBay
+  // code contains ^ # . but never %).
+  return s.includes('%') ? decodeURIComponent(s) : s;
+}
+
+// Complete OAuth by pasting the code (or the whole eBay redirect URL).
+// Fallback for when eBay lands the browser on its generic
+// "Authorization successfully completed" page instead of redirecting to
+// /api/ebay/callback (a RuName Auth-Accepted-URL config quirk). Accepts
+// `input`, `url`, or `code` in the body.
+app.post('/api/ebay/complete-auth', async (req, res) => {
+  const code = extractEbayCode(req.body?.input ?? req.body?.url ?? req.body?.code);
+  if (!code) {
+    return res.status(400).json({
+      error: 'No authorization code found. Paste the full URL eBay redirected you to, or just the code value.',
+    });
+  }
+  try {
+    await ebay.exchangeCode(code);
+    res.json({ ok: true, status: await ebay.status() });
+  } catch (e) {
+    res.status(500).json({ error: `Token exchange failed: ${e.message}` });
+  }
+});
+
 // Return the seller's eBay policies + locations so the user can
 // plug the IDs into env vars (EBAY_*_POLICY_ID).
 app.get('/api/ebay/policies', async (_req, res) => {
