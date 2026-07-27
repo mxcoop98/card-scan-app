@@ -233,17 +233,40 @@ Developer Console → Sandbox → Test Users and create a new one. NEVER use the
 password reset link — it points to a broken domain. Use a boring compliant
 password (`CardScan1!` shape — 8+ chars, upper + lower + number + symbol).
 
-### 6. RuName redirect quirk (workaround: manual code exchange)
+### 6. RuName "auth accepted URL" misconfig — ROOT CAUSE FOUND + FIXED (2026-07-24)
 
-After OAuth consent, eBay sometimes lands on `auth2.ebay.com/oauth2/ThirdPartyAuthSucessFailure`
-("Authorization successfully completed. It's now safe to close the browser window")
-instead of redirecting to our Railway callback. The URL contains `?code=...`.
-Copy the whole URL to Claude / a curl, then hit:
-`GET https://card-scan-app-production.up.railway.app/api/ebay/callback?code=<the-code>`
-to complete the exchange manually. Code is valid for 5 minutes.
+**Symptom:** after OAuth consent, eBay landed on its generic "Authorization
+successfully completed — safe to close the browser window" page instead of
+redirecting to our Railway callback. Later this hardened into a **403 Forbidden**
+(with a Transaction ID) on clicking Connect/Reconnect.
 
-Root cause is probably a RuName ↔ Auth Accepted URL config mismatch in Developer
-Console. Investigate + fix in a future session for smoother UX.
+**Actual root cause:** the *sandbox* RuName's **"Your auth accepted URL"** (and
+declined URL) were set to eBay's **production** generic page
+(`https://signin.ebay.com/ws/eBayISAPI.dll?ThirdPartyAuth...`). A production URL
+inside a sandbox config both dead-ended consent AND got the sandbox authorize
+request rejected (the 403).
+
+**Fix (done in the Developer Console, saved 2026-07-24):**
+- developer.ebay.com → Application Keys → **Sandbox** → **User Tokens** → section
+  "Get a Token from eBay via Your Application" → **Your eBay Sign-in Settings** →
+  expand RuName `Danie_Cooper-DanieCoo-CardSc-gligbmvde`.
+- Set **Your auth accepted URL** = `https://card-scan-app-production.up.railway.app/api/ebay/callback`
+- Clear **Your auth declined URL** (blank → eBay's environment-correct default).
+- Save. Verified: the authorize URL no longer 403s and now routes to
+  `signin.sandbox.ebay.com` consent. (Display Title + privacy-policy URL are still
+  blank — that's fine, OAuth worked with them blank the whole time.)
+
+**Permanent fallback (still in place):** if eBay ever dead-ends on the "safe to
+close" page again, don't curl. Use the in-app **Finish connecting** box on the
+Settings screen — paste the whole redirect URL (or just the code) and it exchanges
+server-side via `POST /api/ebay/complete-auth`. Shipped in commit `dfee564`.
+
+**Also note:** `EBAY_POST_AUTH_REDIRECT=https://card-scan-app.vercel.app/settings`
+is set on Railway so a successful callback bounces back to the live app (not the
+old `localhost:8081` default). The eBay *connection itself was never broken*
+during this whole episode — refresh token is valid to 2028-01 and
+`GET /api/ebay/policies` returned 200 throughout; this was purely about making
+future reconnects painless.
 
 ### 7. Sandbox users need onboarding before publish works
 
@@ -417,10 +440,11 @@ only the canonical production URL is fully public.
 1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is
    hint search. Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider
    when ready to pay.
-2. **eBay v3 items still todo**: RuName redirect fix (currently requires
-   manual code copy after every OAuth), scheduled order-sync cron (Railway
-   cron service pointing at `POST /api/ebay/sync-orders`), production seller
-   onboarding, more polished title / aspect logic per category.
+2. **eBay v3 items still todo**: scheduled order-sync cron (Railway cron
+   service pointing at `POST /api/ebay/sync-orders`), production seller
+   onboarding + getting the prod keyset re-enabled (marketplace-deletion
+   compliance), more polished title / aspect logic per category. The RuName
+   redirect fix is **done** — see gotcha #6.
 3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings,
    Card Ladder, SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate
    one — present tradeoffs.
