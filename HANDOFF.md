@@ -233,7 +233,7 @@ Developer Console → Sandbox → Test Users and create a new one. NEVER use the
 password reset link — it points to a broken domain. Use a boring compliant
 password (`CardScan1!` shape — 8+ chars, upper + lower + number + symbol).
 
-### 6. RuName "auth accepted URL" misconfig — ROOT CAUSE FOUND + FIXED (2026-07-24)
+### 6. RuName "auth accepted URL" misconfig — FIXED + VERIFIED END-TO-END (2026-07-27)
 
 **Symptom:** after OAuth consent, eBay landed on its generic "Authorization
 successfully completed — safe to close the browser window" page instead of
@@ -255,6 +255,17 @@ request rejected (the 403).
 - Save. Verified: the authorize URL no longer 403s and now routes to
   `signin.sandbox.ebay.com` consent. (Display Title + privacy-policy URL are still
   blank — that's fine, OAuth worked with them blank the whole time.)
+
+**End-to-end verified 2026-07-27** (human, real browser): Settings → Connect eBay
+→ sandbox `TESTUSER_` sign-in → consent → **landed back on
+`card-scan-app.vercel.app/settings` automatically**. No manual code copy, no paste
+box needed. This gotcha is closed — the old manual-code-exchange workaround is
+dead, don't resurrect it.
+
+Also confirmed the same day: the access token had expired (2026-07-24T23:20) and a
+single `GET /api/ebay/policies` returned **200** and silently refreshed it to a new
+expiry. The refresh-token path works unattended; a reconnect is NOT part of normal
+operation. Refresh token good to **2028-01-23**.
 
 **Permanent fallback (still in place):** if eBay ever dead-ends on the "safe to
 close" page again, don't curl. Use the in-app **Finish connecting** box on the
