@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS cards (
     -- linking to external catalogs so we can refetch prices
     external_ids    JSONB DEFAULT '{}'::jsonb, -- {"tcgplayer": 12345, "pokemontcg_io": "base1-4"}
     -- media
-    image_url       TEXT,                   -- stored scan or catalog image
+    image_url       TEXT,                   -- front: catalog image or owner's own scan
+    image_url_back  TEXT,                   -- back: owner's own scan (catalogs don't ship one)
     -- housekeeping
     notes           TEXT,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -92,6 +93,26 @@ CREATE INDEX IF NOT EXISTS idx_listing_cards_card ON listing_cards(card_id);
 
 -- Optional acquisition cost so we can compute realized/unrealized P&L.
 ALTER TABLE cards ADD COLUMN IF NOT EXISTS cost_basis NUMERIC(12,2);
+
+-- Back-of-card image, for DBs created before it existed.
+ALTER TABLE cards ADD COLUMN IF NOT EXISTS image_url_back TEXT;
+
+-- Owner-uploaded card photos. These live in the DB rather than object
+-- storage because there is no bucket to write to, and because eBay's
+-- Inventory API only accepts real public HTTPS image URLs — it rejects
+-- data: URIs. Storing the bytes lets us serve them from
+-- /api/cards/:id/image/:side, which is a URL eBay will fetch.
+-- Catalog images are NOT copied here; cards.image_url just points at
+-- the catalog URL in that case.
+CREATE TABLE IF NOT EXISTS card_images (
+    card_id      BIGINT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    side         TEXT   NOT NULL CHECK (side IN ('front','back')),
+    content_type TEXT   NOT NULL,
+    bytes        BYTEA  NOT NULL,
+    byte_size    INT    NOT NULL,
+    updated_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (card_id, side)
+);
 
 -- ============================================================
 -- eBay integration: one row per environment (sandbox / production)

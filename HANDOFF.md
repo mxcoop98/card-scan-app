@@ -362,6 +362,24 @@ force-delete the offer + inventory item and start fresh. Idempotent — safe to
 call even when nothing is stuck.
 ```
 
+### 14. Inventory API rejects `data:` URIs — images must be public HTTPS URLs
+
+This is the whole reason owner photos are stored as bytes in the `card_images`
+table and served from `GET /api/cards/:id/image/:side` instead of being kept as
+data URIs on the card row. eBay fetches image URLs server-side, so they have to
+be real, public, and reachable. Two consequences:
+
+- `app.set('trust proxy', true)` in `server.js` is load-bearing. Railway
+  terminates TLS in front of us, so without it `req.protocol` is `http` and
+  every image URL we hand eBay is unfetchable. Prefer `PUBLIC_BASE_URL` or
+  Railway's `RAILWAY_PUBLIC_DOMAIN` over sniffing the request.
+- `publishListing()` filters image URLs through an `http(s)` test before
+  sending. Fronts lead (the first image becomes the gallery thumbnail), then
+  backs, capped at eBay's limit of 24.
+
+Photo URLs carry a `?v={updated_at}` cache-buster so replacing a photo doesn't
+serve eBay (or the app) a stale copy.
+
 ## Vercel frontend deploy — LESSONS LEARNED
 
 ### Setup (already done, documented here for repro)
@@ -435,7 +453,13 @@ only the canonical production URL is fully public.
   (light/dark aware — the previous hardcoded-white bug that broke input
   visibility on light mode).
 - Portfolio timeseries (daily portfolio USD value from price_history).
-- Pricing provider auto-backfills `image_url` + `external_ids` on price fetch.
+- Pricing provider auto-backfills `image_url` + `external_ids` on price fetch —
+  but only when `image_url` is NULL, so it never overwrites your own photo.
+- **Front + back card photos** — `PUT/GET/DELETE /api/cards/:id/image/:side`,
+  bytes stored in the `card_images` table, front/back capture slots on scan and
+  an add/replace/remove toggle on card detail. Shared capture UI lives in
+  `mobile/src/components/photo-capture.tsx`. See eBay gotcha #14 for why the
+  bytes are in Postgres instead of as data URIs on the card row.
 - **eBay integration** (Railway sandbox, all 4 scopes): OAuth flow, one-shot
   sandbox seller provisioner (Business Policies opt-in + merchant location +
   fulfillment/payment/return policies), single-card publish, multi-card lot
@@ -463,8 +487,9 @@ only the canonical production URL is fully public.
    sports because we don't have a sports card DB. Same fix as sports pricing.
 5. **PSA API for grading** — auto-populate graded price estimates + Pop Report
    probabilities so the grade pill selector fills in without manual entry.
-6. **Front + back card images** — schema addition (`image_url_back`), dual
-   image display on card detail, back-capture in scan.
+6. **Bundle suggestions for cheap cards** — group low-value cards into lots;
+   heuristics on set / year / theme. (Front + back images, previously #6,
+   shipped 2026-07-29.)
 7. **Native camera in dev build / Expo Go** — `scan.tsx` has the
    `expo-image-picker` path but it only fires when the app runs through Expo
    Go or a dev build. Mobile web still uses the file-input `capture="environment"`

@@ -358,8 +358,14 @@ export async function publishListing({ listing, cards }) {
 
   const isLot = cards.length > 1;
   const primary = cards[0];
-  // eBay accepts up to 24 image URLs per listing.
-  const imageUrls = cards.map((c) => c.image_url).filter(Boolean).slice(0, 24);
+  // eBay accepts up to 24 image URLs per listing, and only real public
+  // http(s) URLs — a data: URI is rejected. Fronts lead (the first image
+  // is the gallery thumbnail), then backs.
+  const isFetchable = (u) => typeof u === 'string' && /^https?:\/\//i.test(u);
+  const imageUrls = [
+    ...cards.map((c) => c.image_url),
+    ...cards.map((c) => c.image_url_back),
+  ].filter(isFetchable).slice(0, 24);
 
   // 1. Create/update the inventory item
   await api('PUT', `/sell/inventory/v1/inventory_item/${sku}`, {

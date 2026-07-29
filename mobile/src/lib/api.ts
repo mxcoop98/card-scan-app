@@ -18,6 +18,7 @@ export type Card = {
   grader: string | null;
   external_ids: Record<string, unknown>;
   image_url: string | null;
+  image_url_back: string | null;
   notes: string | null;
   cost_basis: string | null;
   created_at: string;
@@ -26,6 +27,8 @@ export type Card = {
   latest_currency?: string | null;
   latest_price_at?: string | null;
 };
+
+export type CardSide = 'front' | 'back';
 
 export type PriceRow = {
   source: string;
@@ -234,6 +237,17 @@ export const api = {
   refreshPrice: (id: string) =>
     req<{ inserted: number }>(`/api/cards/${id}/refresh-price`, { method: 'POST' }),
   deleteCard: (id: string) => req<void>(`/api/cards/${id}`, { method: 'DELETE' }),
+
+  // card photos — `image` is a base64 data URI straight off the camera
+  // or file input. The backend stores the bytes and returns a real URL,
+  // which is what eBay needs (it won't fetch a data: URI).
+  uploadCardImage: (id: string, side: CardSide, image: string) =>
+    req<{ url: string; byte_size: number; card: Card }>(`/api/cards/${id}/image/${side}`, {
+      method: 'PUT',
+      body: JSON.stringify({ image }),
+    }),
+  deleteCardImage: (id: string, side: CardSide) =>
+    req<void>(`/api/cards/${id}/image/${side}`, { method: 'DELETE' }),
 
   // portfolio
   portfolio: () => req<PortfolioSummary>('/api/portfolio/summary'),

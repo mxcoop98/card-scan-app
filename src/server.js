@@ -11,6 +11,9 @@ import { identifyCard } from './recognition.js';
 import * as ebay from './ebay.js';
 
 const app = express();
+// Railway terminates TLS in front of us; without this req.protocol is
+// always 'http' and the image URLs we hand eBay would be unfetchable.
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
@@ -54,14 +57,15 @@ app.post('/api/cards', async (req, res) => {
   const { rows } = await query(
     `INSERT INTO cards
       (category, name, set_name, card_number, year, player, team, sport,
-       condition, grade, grader, external_ids, image_url, notes, cost_basis)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       condition, grade, grader, external_ids, image_url, image_url_back, notes, cost_basis)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
      RETURNING *`,
     [
       b.category, b.name, b.set_name ?? null, b.card_number ?? null, b.year ?? null,
       b.player ?? null, b.team ?? null, b.sport ?? null,
       b.condition ?? null, b.grade ?? null, b.grader ?? null,
-      b.external_ids ?? {}, b.image_url ?? null, b.notes ?? null, b.cost_basis ?? null,
+      b.external_ids ?? {}, b.image_url ?? null, b.image_url_back ?? null,
+      b.notes ?? null, b.cost_basis ?? null,
     ]
   );
   const card = rows[0];
@@ -112,7 +116,7 @@ async function enrichCard(card, fetched) {
 // --- patch mutable card fields (cost_basis, notes, condition, grade info) ---
 app.patch('/api/cards/:id', async (req, res) => {
   const b = req.body;
-  const fields = ['cost_basis', 'notes', 'condition', 'grade', 'grader', 'image_url', 'set_name', 'card_number', 'year', 'player', 'team', 'sport'];
+  const fields = ['cost_basis', 'notes', 'condition', 'grade', 'grader', 'image_url', 'image_url_back', 'set_name', 'card_number', 'year', 'player', 'team', 'sport'];
   const sets = [];
   const values = [];
   for (const f of fields) {
@@ -134,6 +138,106 @@ app.patch('/api/cards/:id', async (req, res) => {
 // --- delete a card ---
 app.delete('/api/cards/:id', async (req, res) => {
   await query('DELETE FROM cards WHERE id = $1', [req.params.id]);
+  res.status(204).end();
+});
+
+// ============================================================
+// Card photos (front + back)
+//
+// The owner's own photos of their copy, as opposed to the catalog stock
+// image. We store the bytes and serve them back over HTTP rather than
+// keeping data: URIs on the card row, for two reasons: GET /api/cards
+// would otherwise ship megabytes of base64 per card, and eBay's
+// Inventory API only accepts real public image URLs — it rejects data:
+// URIs outright. cards.image_url / image_url_back hold whichever URL is
+// current for that side, ours or the catalog's.
+// ============================================================
+
+const IMAGE_SIDES = { front: 'image_url', back: 'image_url_back' };
+const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
+const DATA_URI = /^data:(image\/(?:jpeg|jpg|png|webp|heic|heif));base64,(.+)$/is;
+
+// Absolute base for the image links we hand out. eBay has to be able to
+// fetch these, so prefer an explicit override, then Railway's injected
+// domain, then the host the request actually arrived on.
+function publicBaseUrl(req) {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/+$/, '');
+  if (process.env.RAILWAY_PUBLIC_DOMAIN) return `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`;
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+// --- upload/replace one side's photo; body { image: "data:image/jpeg;base64,..." } ---
+app.put('/api/cards/:id/image/:side', async (req, res) => {
+  const column = IMAGE_SIDES[req.params.side];
+  if (!column) return res.status(400).json({ error: "side must be 'front' or 'back'" });
+
+  const match = DATA_URI.exec(req.body?.image ?? '');
+  if (!match) {
+    return res.status(400).json({ error: 'image must be a base64 data URI (jpeg, png, webp, or heic)' });
+  }
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length === 0) return res.status(400).json({ error: 'image decoded to zero bytes' });
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    return res.status(413).json({
+      error: `image is ${(bytes.length / 1e6).toFixed(1)}MB; limit is ${MAX_IMAGE_BYTES / 1e6}MB`,
+    });
+  }
+
+  const card = await query('SELECT id FROM cards WHERE id = $1', [req.params.id]);
+  if (!card.rows[0]) return res.status(404).json({ error: 'not found' });
+
+  const stored = await query(
+    `INSERT INTO card_images (card_id, side, content_type, bytes, byte_size)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (card_id, side) DO UPDATE
+       SET content_type = EXCLUDED.content_type,
+           bytes        = EXCLUDED.bytes,
+           byte_size    = EXCLUDED.byte_size,
+           updated_at   = now()
+     RETURNING updated_at`,
+    [req.params.id, req.params.side, match[1].toLowerCase(), bytes, bytes.length]
+  );
+
+  // Version the URL so replacing a photo busts any cached copy of the old one.
+  const version = new Date(stored.rows[0].updated_at).getTime();
+  const url = `${publicBaseUrl(req)}/api/cards/${req.params.id}/image/${req.params.side}?v=${version}`;
+  const { rows } = await query(
+    `UPDATE cards SET ${column} = $1, updated_at = now() WHERE id = $2 RETURNING *`,
+    [url, req.params.id]
+  );
+  res.status(201).json({ url, byte_size: bytes.length, card: rows[0] });
+});
+
+// --- serve a stored photo (public + cacheable so eBay can fetch it) ---
+app.get('/api/cards/:id/image/:side', async (req, res) => {
+  if (!IMAGE_SIDES[req.params.side]) return res.status(400).json({ error: "side must be 'front' or 'back'" });
+  const { rows } = await query(
+    'SELECT content_type, bytes, updated_at FROM card_images WHERE card_id = $1 AND side = $2',
+    [req.params.id, req.params.side]
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'not found' });
+
+  const etag = `"${new Date(rows[0].updated_at).getTime()}"`;
+  res.set('Content-Type', rows[0].content_type);
+  res.set('Cache-Control', 'public, max-age=3600');
+  res.set('ETag', etag);
+  if (req.headers['if-none-match'] === etag) return res.status(304).end();
+  res.send(rows[0].bytes);
+});
+
+// --- remove a stored photo ---
+// Only clears the card's URL if it still points at the photo we're
+// deleting, so a front that's a catalog image is left alone. Once the
+// front URL is null again, the next price refresh re-backfills the
+// catalog image via enrichCard().
+app.delete('/api/cards/:id/image/:side', async (req, res) => {
+  const column = IMAGE_SIDES[req.params.side];
+  if (!column) return res.status(400).json({ error: "side must be 'front' or 'back'" });
+  await query('DELETE FROM card_images WHERE card_id = $1 AND side = $2', [req.params.id, req.params.side]);
+  await query(
+    `UPDATE cards SET ${column} = NULL, updated_at = now() WHERE id = $1 AND ${column} LIKE $2`,
+    [req.params.id, `%/api/cards/${req.params.id}/image/${req.params.side}%`]
+  );
   res.status(204).end();
 });
 

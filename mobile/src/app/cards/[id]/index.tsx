@@ -5,18 +5,17 @@ import { Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 're
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BOTTOM_TAB_HEIGHT } from '@/components/bottom-tab-bar';
+import { CARD_ASPECT, PhotoCapture } from '@/components/photo-capture';
 import { Skeleton } from '@/components/skeleton';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
-import { api, type Card, type GradedEstimate, type GradeProbability, type PriceRow } from '@/lib/api';
+import { api, type Card, type CardSide, type GradedEstimate, type GradeProbability, type PriceRow } from '@/lib/api';
 import { confirm } from '@/lib/confirm';
 
 type Detail = Card & { price_history: PriceRow[] };
 type GradeTab = 'RAW' | 'PSA' | 'BGS' | 'SGC';
 const GRADE_TABS: GradeTab[] = ['RAW', 'PSA', 'BGS', 'SGC'];
-
-const CARD_ASPECT = 5 / 7;
 
 export default function CardDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,11 +23,17 @@ export default function CardDetail() {
   const [estimates, setEstimates] = useState<GradedEstimate[]>([]);
   const [probabilities, setProbabilities] = useState<GradeProbability[]>([]);
   const [tab, setTab] = useState<GradeTab>('RAW');
+  const [side, setSide] = useState<CardSide>('front');
+  const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { width } = useWindowDimensions();
 
   const imageWidth = Math.min(width * 0.6, 320);
+  const shownPhoto = (side === 'front' ? card?.image_url : card?.image_url_back) ?? null;
+  // Photos we host are removable; a catalog URL on the front isn't ours
+  // to delete, so we don't offer it.
+  const isOwnPhoto = (url: string | null) => !!url && url.includes(`/api/cards/${id}/image/`);
 
   const load = useCallback(async () => {
     setError(null);
@@ -69,6 +74,32 @@ export default function CardDetail() {
       router.push({ pathname: '/listings/[id]', params: { id: listing.id } });
     } catch (e: any) { setError(e.message); }
     finally { setBusy(false); }
+  }
+
+  async function uploadPhoto(dataUri: string) {
+    setError(null);
+    setUploading(true);
+    try {
+      await api.uploadCardImage(id, side, dataUri);
+      await load();
+    } catch (e: any) { setError(e.message); }
+    finally { setUploading(false); }
+  }
+
+  function removePhoto() {
+    const isFront = side === 'front';
+    confirm(
+      `Remove ${side} photo?`,
+      isFront
+        ? 'The catalog image comes back the next time you refresh the price.'
+        : 'The back photo is only yours — there is no catalog image to fall back on.',
+      async () => {
+        setUploading(true);
+        try { await api.deleteCardImage(id, side); await load(); }
+        catch (e: any) { setError(e.message); }
+        finally { setUploading(false); }
+      }
+    );
   }
 
   function del() {
@@ -129,13 +160,58 @@ export default function CardDetail() {
           {card && (
             <>
               <ThemedView style={styles.imageRow}>
-                <ThemedView style={[styles.imageBox, { width: imageWidth, aspectRatio: CARD_ASPECT }]}>
-                  {card.image_url ? (
-                    <Image source={{ uri: card.image_url }} style={styles.image} contentFit="contain" />
+                <Pressable
+                  onPress={() => setSide(side === 'front' ? 'back' : 'front')}
+                  style={[styles.imageBox, { width: imageWidth, aspectRatio: CARD_ASPECT }]}>
+                  {shownPhoto ? (
+                    <Image source={{ uri: shownPhoto }} style={styles.image} contentFit="contain" />
                   ) : (
                     <ThemedView style={styles.placeholder}>
-                      <ThemedText type="small" style={{ opacity: 0.5 }}>no image</ThemedText>
+                      <ThemedText type="small" style={{ opacity: 0.5 }}>no {side} image</ThemedText>
                     </ThemedView>
+                  )}
+                </Pressable>
+
+                {/* Front/back toggle — dimmed when that side has no image */}
+                <ThemedView style={styles.pillRow}>
+                  {(['front', 'back'] as CardSide[]).map((s) => {
+                    const active = side === s;
+                    const has = s === 'front' ? !!card.image_url : !!card.image_url_back;
+                    return (
+                      <Pressable
+                        key={s}
+                        onPress={() => setSide(s)}
+                        style={[styles.pill, active && styles.pillActive]}>
+                        <ThemedText
+                          type="defaultSemiBold"
+                          style={{
+                            color: active ? 'white' : has ? undefined : 'rgba(127,127,127,0.6)',
+                            fontSize: 13,
+                          }}>
+                          {s === 'front' ? 'Front' : 'Back'}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </ThemedView>
+
+                <ThemedView style={{ width: imageWidth, gap: 4, backgroundColor: 'transparent' }}>
+                  <PhotoCapture
+                    onCapture={uploadPhoto}
+                    disabled={uploading}
+                    tone="secondary"
+                    label={
+                      uploading
+                        ? 'Working…'
+                        : shownPhoto
+                          ? `📷  Replace ${side}`
+                          : `📷  Add ${side} photo`
+                    }
+                  />
+                  {isOwnPhoto(shownPhoto) && !uploading && (
+                    <Pressable onPress={removePhoto} style={{ alignSelf: 'center', padding: 4 }}>
+                      <ThemedText type="small" style={{ color: '#ff5555' }}>Remove {side} photo</ThemedText>
+                    </Pressable>
                   )}
                 </ThemedView>
               </ThemedView>
@@ -334,7 +410,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   safeArea: { flex: 1 },
   backRow: { alignSelf: 'flex-start', paddingVertical: 4, paddingHorizontal: 6 },
-  imageRow: { alignItems: 'center', backgroundColor: 'transparent' },
+  imageRow: { alignItems: 'center', gap: Spacing.two, backgroundColor: 'transparent' },
   imageBox: {
     borderRadius: Spacing.three,
     overflow: 'hidden',
