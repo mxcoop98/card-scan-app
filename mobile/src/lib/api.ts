@@ -30,6 +30,17 @@ export type Card = {
 
 export type CardSide = 'front' | 'back';
 
+export type OcrHints = {
+  name: string | null;
+  card_number: string | null;
+  /** Always null — Pokémon sets are a printed symbol, not readable text. */
+  set_name: string | null;
+  confidence: number;
+  text: string;
+  provider: string;
+  took_ms: number;
+};
+
 export type PriceRow = {
   source: string;
   price: string;
@@ -323,6 +334,12 @@ export const api = {
     // `degraded` = a lookup provider errored, so an empty candidate list
     // isn't authoritative and the user should retry rather than re-hint.
   }) => req<{ candidates: ScanCandidate[]; degraded?: boolean }>('/api/scan', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Read a card photo for search hints. Any field may come back null when
+  // the read wasn't confident — that's deliberate, since a wrong value is
+  // worse than an empty box the user was going to fill anyway.
+  ocr: (image: string) =>
+    req<OcrHints>('/api/ocr', { method: 'POST', body: JSON.stringify({ image }) }),
   variants: (params: {
     category: 'pokemon' | 'sports';
     name: string;

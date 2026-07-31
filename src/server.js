@@ -8,6 +8,7 @@ import { migrate } from './migrate.js';
 import { analyzeGrading } from './grading.js';
 import { suggestBundles } from './bundling.js';
 import { identifyCard } from './recognition.js';
+import { readCardHints } from './ocr.js';
 import * as ebay from './ebay.js';
 
 const app = express();
@@ -679,6 +680,38 @@ app.post('/api/scan', async (req, res) => {
   // rather than a genuine miss, so it can offer a retry instead of sending
   // the user to rewrite hints that were fine.
   res.json({ candidates, degraded });
+});
+
+// Read a card photo and return search hints to prefill the scan form.
+// Body: { image: "data:image/jpeg;base64,..." }
+//
+// Separate from /api/scan on purpose. The user sees what was read and can
+// correct it before searching, which matters because OCR on a glossy,
+// stylised card is good but not reliable — silently searching on a
+// misread would just look like the app failing to find their card.
+app.post('/api/ocr', async (req, res) => {
+  const match = DATA_URI.exec(req.body?.image ?? '');
+  if (!match) {
+    return res.status(400).json({ error: 'image must be a base64 data URI (jpeg, png, webp, or heic)' });
+  }
+  const bytes = Buffer.from(match[2], 'base64');
+  if (bytes.length === 0) return res.status(400).json({ error: 'image decoded to zero bytes' });
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    return res.status(413).json({
+      error: `image is ${(bytes.length / 1e6).toFixed(1)}MB; limit is ${MAX_IMAGE_BYTES / 1e6}MB`,
+    });
+  }
+
+  try {
+    const started = Date.now();
+    const hints = await readCardHints(bytes);
+    res.json({ ...hints, took_ms: Date.now() - started });
+  } catch (err) {
+    console.error('ocr failed:', err.message);
+    // A failed read is not a failed scan — the user can still type the
+    // fields themselves, so say so rather than blocking them.
+    res.status(503).json({ error: 'could not read the card photo', detail: err.message });
+  }
 });
 
 // ============================================================

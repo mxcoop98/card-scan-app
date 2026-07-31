@@ -8,3 +8,7 @@ node_modules
 
 # Local design references / debugging screenshots
 screenshots/
+
+# tesseract.js caches its language model next to the process on first OCR.
+# ~5MB binary, re-downloaded automatically — never commit it.
+*.traineddata

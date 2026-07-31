@@ -489,6 +489,11 @@ only the canonical production URL is fully public.
 - Portfolio timeseries (daily portfolio USD value from price_history).
 - Pricing provider auto-backfills `image_url` + `external_ids` on price fetch —
   but only when `image_url` is NULL, so it never overwrites your own photo.
+- **OCR auto-fill** — `POST /api/ocr` reads a card photo and returns
+  `{name, card_number, set_name, confidence}` to prefill the scan form.
+  Provider registry in `src/ocr.js`, same shape as pricing/recognition, so a
+  paid identifier drops in as one function. See "OCR" below for accuracy and
+  the tuning that got there.
 - **Front + back card photos** — `PUT/GET/DELETE /api/cards/:id/image/:side`,
   bytes stored in the `card_images` table, front/back capture slots on scan and
   an add/replace/remove toggle on card detail. Shared capture UI lives in
@@ -506,9 +511,10 @@ only the canonical production URL is fully public.
   routes hydrate correctly. Deployment Protection is off for public access.
 
 **Not built (roadmap):**
-1. **Image-based recognition** — `recognition.js` has the abstraction; v1 is
-   hint search. Wire Ximilar `/v2/tcg_id` or Google Vision as a new provider
-   when ready to pay.
+1. **Image-based recognition** — `recognition.js` has the abstraction, and OCR
+   auto-fill now covers the free tier (name + number off the photo). Wire
+   Ximilar `/v2/tcg_id` as a provider when ready to pay: it identifies the exact
+   printing rather than inferring it from text, and covers sports too.
 2. **eBay v3 items still todo**: scheduled order-sync cron (Railway cron
    service pointing at `POST /api/ebay/sync-orders`), production seller
    onboarding + getting the prod keyset re-enabled (marketplace-deletion
@@ -528,6 +534,52 @@ only the canonical production URL is fully public.
    `expo-image-picker` path but it only fires when the app runs through Expo
    Go or a dev build. Mobile web still uses the file-input `capture="environment"`
    flow which already opens the phone camera.
+
+## OCR — what it actually does, and what it cost to get there
+
+`POST /api/ocr` takes a card photo and returns search hints. It runs
+**tesseract.js locally**: no API key, no vendor decision, no per-scan cost.
+Measured on six real Base Set / Jungle scans:
+
+| | result |
+|---|---|
+| name correct | 5/6 |
+| name **wrong** | **0/6** |
+| card number | 6/6 |
+| latency | 1.1–2.6s |
+
+The zero is the number that matters. A wrong value in a field is worse than an
+empty one, because the user has to notice it before it silently poisons the
+search. Poliwrath reads as `null` rather than a guess, and the UI says so.
+
+Three things were needed to get there, none of them obvious:
+
+1. **Pick the name by confidence, not size.** Holo foil makes OCR hallucinate
+   large nonsense over the artwork. On a Base Set Charizard the two tallest
+   "words" are `sthce` (44px, 66% confident) and `Eon` (32px, 47%) — the real
+   name is only 29px but **96%** confident. Selecting by height picks garbage
+   every time; `confidence >= 70` separates them cleanly. Height is still used,
+   but only among words that already cleared the confidence bar.
+2. **Read the collector number from a second pass over the bottom strip.** It's
+   small and often sits over artwork; a whole-card pass missed it half the time.
+   `worker.recognize(buf, { rectangle })` confines OCR to the bottom 18%, which
+   took the number from 2/6 to 6/6. That needs image dimensions, which
+   `imageSize()` parses straight out of the PNG/JPEG header rather than pulling
+   in an image library.
+3. **Set name is deliberately never returned.** Pokémon sets are identified by a
+   printed symbol, not text, so there is nothing to read. Guessing would put a
+   wrong value in a field the user then has to notice and clear.
+
+**The card number is printed `4/102` but the catalog stores `4`.** The scan
+form's own placeholder says `4/102`, so anyone typing what it suggests got zero
+results — a real bug that predated OCR and that OCR would have made constant.
+`pokemonTcgSearch` now keeps only the part before the slash (and strips zero
+padding, so `058/198` works).
+
+Worth knowing about deployment: tesseract.js pulls `eng.traineddata` from a CDN
+on first use in a fresh container, so the first scan after a deploy is slower.
+If that fetch fails the endpoint returns 503 and the scan screen tells the user
+to type the fields instead — OCR failing never blocks adding a card.
 
 ## Gotchas we've hit (so you don't waste a session on them)
 

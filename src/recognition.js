@@ -48,7 +48,13 @@ async function fetchWithRetry(url, headers) {
 async function pokemonTcgSearch({ hints }) {
   const q = [];
   if (hints.name)        q.push(`name:"${hints.name}"`);
-  if (hints.card_number) q.push(`number:${hints.card_number}`);
+  // Cards are printed "4/102" and the scan form's own placeholder says so,
+  // but the catalog stores only the collector number — "4". Querying the
+  // printed form matches nothing, so keep just the part before the slash.
+  if (hints.card_number) {
+    const number = String(hints.card_number).split('/')[0].trim().replace(/^0+(?=\d)/, '');
+    if (number) q.push(`number:${number}`);
+  }
   if (hints.set_name)    q.push(`set.name:"${hints.set_name}"`);
   if (q.length === 0) return [];
 

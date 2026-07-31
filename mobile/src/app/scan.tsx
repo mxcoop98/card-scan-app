@@ -30,6 +30,34 @@ export default function ScanScreen() {
   // Set only when the card row was created but a photo upload failed —
   // lets us offer a way through instead of stranding the user.
   const [strandedCardId, setStrandedCardId] = useState<string | null>(null);
+  const [reading, setReading] = useState(false);
+  const [readResult, setReadResult] = useState<'filled' | 'partial' | 'nothing' | 'failed' | null>(null);
+
+  // Read the card as soon as the front photo lands, and prefill whatever
+  // came back. Only empty fields are touched: if the user already typed
+  // something, they know more than the OCR does.
+  async function readCard(dataUri: string) {
+    setReading(true);
+    setReadResult(null);
+    try {
+      const hints = await api.ocr(dataUri);
+      let filled = 0;
+      if (hints.name && !name.trim()) { setCardName(hints.name); filled++; }
+      if (hints.card_number && !cardNumber.trim()) { setCardNumber(hints.card_number); filled++; }
+      const available = [hints.name, hints.card_number].filter(Boolean).length;
+      setReadResult(available === 0 ? 'nothing' : filled === 0 ? 'nothing' : available === 2 ? 'filled' : 'partial');
+    } catch {
+      // Not fatal — the fields are still there to type into.
+      setReadResult('failed');
+    } finally {
+      setReading(false);
+    }
+  }
+
+  function onFrontCapture(dataUri: string) {
+    setFrontPhoto(dataUri);
+    readCard(dataUri);
+  }
 
   async function search() {
     setError(null);
@@ -140,12 +168,28 @@ export default function ScanScreen() {
           {/* Capture area — front is used for matching, back is stored
               with the card (catalogs don't publish a back image). */}
           <ThemedView style={styles.captureArea}>
-            <PhotoSlot title="FRONT" uri={frontPhoto} onCapture={setFrontPhoto} onClear={() => setFrontPhoto(null)} />
+            <PhotoSlot title="FRONT" uri={frontPhoto} onCapture={onFrontCapture} onClear={() => { setFrontPhoto(null); setReadResult(null); }} />
             <PhotoSlot title="BACK (optional)" uri={backPhoto} onCapture={setBackPhoto} onClear={() => setBackPhoto(null)} />
           </ThemedView>
           <ThemedText type="small" style={{ opacity: 0.6, textAlign: 'center' }}>
             Both photos are saved to the card and used in eBay listings.
           </ThemedText>
+
+          {/* What the photo gave us. Said plainly, because these fields are
+              a guess the user is expected to check rather than an answer. */}
+          {(reading || readResult) && (
+            <ThemedText type="small" style={{ textAlign: 'center', opacity: 0.75 }}>
+              {reading
+                ? 'Reading the card…'
+                : readResult === 'filled'
+                  ? '✓ Filled in from your photo — check it before searching.'
+                  : readResult === 'partial'
+                    ? '✓ Read part of the card — fill in the rest if you can.'
+                    : readResult === 'nothing'
+                      ? 'Couldn’t make out the text — type what you can read.'
+                      : 'Card reading is unavailable right now — type what you can read.'}
+            </ThemedText>
+          )}
 
           {stage.kind === 'input' && category === 'sports' && (
             <ThemedView type="backgroundElement" style={styles.comingSoon}>
