@@ -7,13 +7,21 @@
 // which opens the rear camera on a phone and a file dialog on desktop.
 
 import { Image } from 'expo-image';
+import { useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
+import { LIVE_CAMERA_SUPPORTED, LiveCamera } from '@/components/live-camera';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 
 export const CARD_ASPECT = 5 / 7;
+
+// Overlays live sharpness/motion/framing readings on the viewfinder. The
+// auto-capture thresholds need tuning against real cards under real light,
+// and guessing blind is how you end up with a shutter that never fires.
+// Set EXPO_PUBLIC_DEBUG_AUTOCAPTURE=1 to turn it on.
+const DEBUG_AUTOCAPTURE = process.env.EXPO_PUBLIC_DEBUG_AUTOCAPTURE === '1';
 
 type CaptureProps = {
   onCapture: (dataUri: string) => void;
@@ -128,6 +136,24 @@ export function PhotoSlot({
   onClear?: () => void;
   width?: number;
 }) {
+  const [aiming, setAiming] = useState(false);
+
+  // While the viewfinder is open it replaces the still frame entirely —
+  // showing both a live preview and a placeholder frame reads as two
+  // separate capture targets.
+  if (aiming) {
+    return (
+      <ThemedView style={[styles.slot, width ? { width } : { flex: 1 }]}>
+        <ThemedText type="small" style={{ opacity: 0.6, textAlign: 'center' }}>{title}</ThemedText>
+        <LiveCamera
+          onCapture={(dataUri) => { setAiming(false); onCapture(dataUri); }}
+          onCancel={() => setAiming(false)}
+          debug={DEBUG_AUTOCAPTURE}
+        />
+      </ThemedView>
+    );
+  }
+
   return (
     <ThemedView style={[styles.slot, width ? { width } : { flex: 1 }]}>
       <ThemedText type="small" style={{ opacity: 0.6, textAlign: 'center' }}>{title}</ThemedText>
@@ -143,11 +169,26 @@ export function PhotoSlot({
           </ThemedView>
         )}
       </ThemedView>
-      <PhotoCapture
-        onCapture={onCapture}
-        label={uri ? 'Retake' : '📷  Capture'}
-        tone={uri ? 'secondary' : 'primary'}
-      />
+
+      {LIVE_CAMERA_SUPPORTED ? (
+        <>
+          <Pressable onPress={() => setAiming(true)} style={[styles.button, !uri && styles.primary]}>
+            <ThemedText type="defaultSemiBold" style={!uri ? { color: 'white' } : undefined}>
+              {uri ? 'Retake' : '📷  Scan card'}
+            </ThemedText>
+          </Pressable>
+          {/* Kept as an escape hatch: no camera permission, a photo already
+              in the library, or a desktop with no usable webcam. */}
+          <PhotoCapture onCapture={onCapture} label="Choose a photo" tone="secondary" />
+        </>
+      ) : (
+        <PhotoCapture
+          onCapture={onCapture}
+          label={uri ? 'Retake' : '📷  Capture'}
+          tone={uri ? 'secondary' : 'primary'}
+        />
+      )}
+
       {uri && onClear && (
         <Pressable onPress={onClear} style={styles.clear}>
           <ThemedText type="small" style={{ color: '#ff5555' }}>Remove</ThemedText>
