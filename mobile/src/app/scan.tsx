@@ -15,7 +15,7 @@ import { api, type Card, type ScanCandidate, type Variant } from '@/lib/api';
 type Stage =
   | { kind: 'input' }
   | { kind: 'searching' }
-  | { kind: 'candidates'; candidates: ScanCandidate[] }
+  | { kind: 'candidates'; candidates: ScanCandidate[]; degraded?: boolean }
   | { kind: 'variants'; base: ScanCandidate; variants: Variant[] };
 
 export default function ScanScreen() {
@@ -40,7 +40,7 @@ export default function ScanScreen() {
         hints: { name: name || undefined, set_name: setName || undefined, card_number: cardNumber || undefined },
         image: frontPhoto ?? undefined,
       });
-      setStage({ kind: 'candidates', candidates: res.candidates });
+      setStage({ kind: 'candidates', candidates: res.candidates, degraded: res.degraded });
     } catch (e: any) {
       setError(e.message);
       setStage({ kind: 'input' });
@@ -193,14 +193,28 @@ export default function ScanScreen() {
             <>
               <ThemedView style={styles.stageHeader}>
                 <ThemedText type="defaultSemiBold">
-                  {stage.candidates.length === 0
-                    ? 'No matches — refine your hints.'
-                    : `${stage.candidates.length} candidate${stage.candidates.length === 1 ? '' : 's'}`}
+                  {stage.candidates.length > 0
+                    ? `${stage.candidates.length} candidate${stage.candidates.length === 1 ? '' : 's'}`
+                    : stage.degraded
+                      ? 'Card lookup is having trouble.'
+                      : 'No matches — refine your hints.'}
                 </ThemedText>
-                <Pressable onPress={() => setStage({ kind: 'input' })}>
-                  <ThemedText type="defaultSemiBold" style={{ color: '#4a9eff' }}>Edit hints</ThemedText>
+                <Pressable onPress={() => (stage.degraded ? search() : setStage({ kind: 'input' }))}>
+                  <ThemedText type="defaultSemiBold" style={{ color: '#4a9eff' }}>
+                    {stage.degraded ? 'Try again' : 'Edit hints'}
+                  </ThemedText>
                 </Pressable>
               </ThemedView>
+
+              {/* A degraded result can still contain partial matches, so say
+                  so even when the list isn't empty — the missing card may be
+                  the one they were looking for. */}
+              {stage.degraded && (
+                <ThemedText type="small" style={{ opacity: 0.7 }}>
+                  The card catalog didn’t respond in full, so results may be incomplete.
+                  Your hints are probably fine — try again in a moment.
+                </ThemedText>
+              )}
 
               {stage.candidates.map((c, i) => (
                 <ThemedView key={i} type="backgroundElement" style={styles.candidate}>

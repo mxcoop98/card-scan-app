@@ -674,8 +674,11 @@ app.get('/api/variants', async (req, res) => {
 app.post('/api/scan', async (req, res) => {
   const { category, hints, image } = req.body ?? {};
   if (!category) return res.status(400).json({ error: 'category required' });
-  const candidates = await identifyCard({ category, hints, image });
-  res.json({ candidates });
+  const { candidates, degraded } = await identifyCard({ category, hints, image });
+  // `degraded` tells the client an empty list may be the catalog failing
+  // rather than a genuine miss, so it can offer a retry instead of sending
+  // the user to rewrite hints that were fine.
+  res.json({ candidates, degraded });
 });
 
 // ============================================================

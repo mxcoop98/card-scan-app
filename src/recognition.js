@@ -14,6 +14,37 @@
 //   - ebaySoldMatch: image → visually similar sold listings
 // ============================================================
 
+// PokemonTCG.io throws sporadic 5xx even on well-formed queries — measured
+// around a 30% failure rate on repeated identical requests, with or without
+// an API key. A single attempt therefore shows the user "no matches" for a
+// card that plainly exists, so retry transient failures before giving up.
+// 4xx is not retried: that's our query being wrong, and repeating it won't help.
+const RETRY_DELAYS_MS = [250, 750, 1500];
+
+class PermanentError extends Error {}
+
+async function fetchWithRetry(url, headers) {
+  let lastError;
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, RETRY_DELAYS_MS[attempt - 1]));
+    try {
+      const res = await fetch(url, { headers });
+      if (res.ok) return res;
+      // 5xx and 429 are worth another go; anything else is our fault.
+      if (res.status >= 500 || res.status === 429) {
+        lastError = new Error(`pokemontcg.io ${res.status}`);
+        continue;
+      }
+      throw new PermanentError(`pokemontcg.io ${res.status}`);
+    } catch (err) {
+      if (err instanceof PermanentError) throw err;
+      // Network-level failure (DNS, TLS, socket) — also worth retrying.
+      lastError = err;
+    }
+  }
+  throw lastError;
+}
+
 async function pokemonTcgSearch({ hints }) {
   const q = [];
   if (hints.name)        q.push(`name:"${hints.name}"`);
@@ -25,8 +56,7 @@ async function pokemonTcgSearch({ hints }) {
   const headers = {};
   if (process.env.POKEMONTCG_API_KEY) headers['X-Api-Key'] = process.env.POKEMONTCG_API_KEY;
 
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`pokemontcg.io ${res.status}`);
+  const res = await fetchWithRetry(url, headers);
   const json = await res.json();
   const cards = json.data ?? [];
 
@@ -61,12 +91,17 @@ const PROVIDERS = {
 export async function identifyCard({ category, hints, image }) {
   const providers = PROVIDERS[category] || [];
   const results = [];
+  // Track failures separately so the caller can tell "this card isn't in the
+  // catalog" apart from "the catalog was down". Reporting both as an empty
+  // list sends the user off editing hints that were never the problem.
+  const failures = [];
   for (const p of providers) {
     try {
       const candidates = await p({ hints: hints ?? {}, image });
       results.push(...candidates);
     } catch (err) {
       console.error(`recognition provider failed:`, err.message);
+      failures.push(err.message);
     }
   }
   // De-dupe by external_id if present, else by (name, set_name, card_number)
@@ -79,5 +114,7 @@ export async function identifyCard({ category, hints, image }) {
     deduped.push(c);
   }
   deduped.sort((a, b) => b.confidence - a.confidence);
-  return deduped;
+  // `degraded` means at least one provider errored, so an empty/short list
+  // may be under-reporting rather than authoritative.
+  return { candidates: deduped, degraded: failures.length > 0, failures };
 }

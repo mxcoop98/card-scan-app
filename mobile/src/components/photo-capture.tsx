@@ -93,6 +93,26 @@ function NativeCapture({ onCapture, label, tone = 'primary', disabled }: Capture
   );
 }
 
+// Corner brackets marking where the card edges should land. Deliberately
+// card-proportioned (2.5x3.5in => CARD_ASPECT), not square: a square guide
+// would train people to frame a portrait card wrong, which is exactly the
+// framing a future auto-capture / recognition pass has to undo.
+function AlignmentGuide() {
+  const corners = [
+    { top: 0, left: 0, borderTopWidth: 3, borderLeftWidth: 3, borderTopLeftRadius: 6 },
+    { top: 0, right: 0, borderTopWidth: 3, borderRightWidth: 3, borderTopRightRadius: 6 },
+    { bottom: 0, left: 0, borderBottomWidth: 3, borderLeftWidth: 3, borderBottomLeftRadius: 6 },
+    { bottom: 0, right: 0, borderBottomWidth: 3, borderRightWidth: 3, borderBottomRightRadius: 6 },
+  ];
+  return (
+    <View style={styles.guide} pointerEvents="none">
+      {corners.map((c, i) => (
+        <View key={i} style={[styles.corner, c]} />
+      ))}
+    </View>
+  );
+}
+
 // A framed preview with its own capture button. Used for the scan
 // screen's side-by-side front/back slots.
 export function PhotoSlot({
@@ -116,8 +136,9 @@ export function PhotoSlot({
           <Image source={{ uri }} style={styles.image} contentFit="cover" />
         ) : (
           <ThemedView style={styles.frameEmpty}>
+            <AlignmentGuide />
             <ThemedText type="small" style={{ opacity: 0.55, textAlign: 'center' }}>
-              Position card{'\n'}in the frame
+              Line the card up{'\n'}with the corners
             </ThemedText>
           </ThemedView>
         )}
@@ -173,6 +194,10 @@ const styles = StyleSheet.create({
   },
   frameFilled: { borderStyle: 'solid', borderColor: 'rgba(74,158,255,0.6)' },
   frameEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'transparent' },
+  // Inset so the brackets sit just inside the dashed frame rather than
+  // doubling up on it.
+  guide: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, margin: 10 },
+  corner: { position: 'absolute', width: 22, height: 22, borderColor: 'rgba(74,158,255,0.9)' },
   image: { width: '100%', height: '100%' },
   clear: { alignSelf: 'center', paddingVertical: 2 },
 });

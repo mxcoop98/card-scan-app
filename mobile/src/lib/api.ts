@@ -320,7 +320,9 @@ export const api = {
     category: 'pokemon' | 'sports';
     hints?: { name?: string; set_name?: string; card_number?: string };
     image?: string;
-  }) => req<{ candidates: ScanCandidate[] }>('/api/scan', { method: 'POST', body: JSON.stringify(body) }),
+    // `degraded` = a lookup provider errored, so an empty candidate list
+    // isn't authoritative and the user should retry rather than re-hint.
+  }) => req<{ candidates: ScanCandidate[]; degraded?: boolean }>('/api/scan', { method: 'POST', body: JSON.stringify(body) }),
   variants: (params: {
     category: 'pokemon' | 'sports';
     name: string;
