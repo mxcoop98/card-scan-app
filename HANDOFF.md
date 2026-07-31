@@ -399,30 +399,64 @@ serve eBay (or the app) a stale copy.
 
 ### The one vercel.json that works
 
-Multiple rewrites + `cleanUrls: true` + `trailingSlash: false` fought each other
-— dynamic routes 404'd before the rewrite fired. What works, at
-`mobile/vercel.json`:
-
 ```json
 {
   "buildCommand": "npx expo export -p web",
   "outputDirectory": "dist",
   "installCommand": "npm install",
+  "cleanUrls": true,
   "rewrites": [
-    { "source": "/((?!_expo|assets|favicon\\.ico|robots\\.txt).*)", "destination": "/index.html" }
+    { "source": "/((?!_expo|assets|favicon\\.ico|robots\\.txt).*)", "destination": "/" }
   ]
 }
 ```
 
 The negative-lookahead pattern excludes asset paths from the catchall so JS/CSS
-bundles serve directly from `dist/_expo/...`. Every other path falls through to
-`/index.html` and Expo Router hydrates the correct screen from `window.location`.
-Static routes (`/portfolio`, `/settings`, etc.) still get their pre-rendered
-HTML because Vercel checks for a matching file BEFORE running rewrites — a
-`.html` file with the same name wins.
+bundles serve directly from `dist/_expo/...`.
 
-Do NOT re-add `cleanUrls: true` or per-route explicit rewrites — both broke
-dynamic routing in testing.
+**`cleanUrls: true` and `destination: "/"` are a package — changing either one
+alone breaks the site.** `cleanUrls` makes `/index.html` redirect to the
+extensionless form, so a rewrite pointing at `/index.html` no longer lands on a
+file and Vercel answers NOT_FOUND. That is what "cleanUrls broke dynamic
+routing" meant in the earlier attempt: `/cards/:id` and `/listings/:id` returned
+404, taking out card detail deep links and refreshes. `/` serves the same
+index.html and is not itself redirected, so the catchall works again.
+
+**Correcting a claim this file used to make:** it said static routes got their
+pre-rendered HTML anyway, because Vercel checks the filesystem before rewrites
+and "a `.html` file with the same name wins". That is wrong, and it hid a bug
+for a while. `/portfolio` has no extension, so it never matched `portfolio.html`
+during the filesystem phase — the catchall swallowed it. Every route served
+byte-identical `index.html` (verified: same md5 for `/`, `/scan`, `/portfolio`),
+so every non-index route hydrated markup for the wrong page and React logged
+error #418 in production. `cleanUrls` is what actually makes the extensionless
+path resolve to the `.html` file.
+
+Current behaviour, measured on a preview deployment:
+
+- `/`, `/scan`, `/portfolio`, `/bundles`, `/listings`, `/settings`, `/cards/new`
+  → their own pre-rendered HTML, hydrate clean, no console errors.
+- `/cards/:id`, `/listings/:id`, `/cards/:id/grading`, unknown paths → 200
+  serving index.html via the catchall, client-rendered as before.
+
+Dynamic routes still hydrate index.html and so still log #418. Fixing that needs
+explicit rewrites to files named with literal brackets
+(`dist/cards/[id].html`), which is the per-route approach that caused trouble
+before — worth attempting only on a preview, never straight to main.
+
+Verify any change to this file on a preview deploy before merging. Push the
+branch, then find the preview URL without needing the Vercel CLI:
+
+```
+sha=$(git rev-parse HEAD)
+curl -s "https://api.github.com/repos/mxcoop98/card-scan-app/deployments?sha=$sha" # -> statuses_url
+curl -s "<statuses_url>"                                                          # -> environment_url
+```
+
+Preview URLs still sit behind Deployment Protection even though production does
+not, so anonymous `curl` gets a 302 to Vercel SSO. Open them in a browser that
+is already signed in to Vercel, and fetch same-origin from the page to inspect
+other routes.
 
 ### Production URL vs preview URLs
 
