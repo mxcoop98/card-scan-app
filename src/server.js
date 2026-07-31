@@ -704,7 +704,7 @@ app.post('/api/ocr', async (req, res) => {
 
   try {
     const started = Date.now();
-    const hints = await readCardHints(bytes);
+    const hints = await readCardHints(bytes, req.body?.category === 'sports' ? 'sports' : 'pokemon');
     res.json({ ...hints, took_ms: Date.now() - started });
   } catch (err) {
     console.error('ocr failed:', err.message);

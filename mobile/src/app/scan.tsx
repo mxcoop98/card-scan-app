@@ -23,6 +23,8 @@ export default function ScanScreen() {
   const [name, setCardName] = useState('');
   const [setName, setSet] = useState('');
   const [cardNumber, setCardNumber] = useState('');
+  const [team, setTeam] = useState('');
+  const [year, setYear] = useState('');
   const [frontPhoto, setFrontPhoto] = useState<string | null>(null);
   const [backPhoto, setBackPhoto] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>({ kind: 'input' });
@@ -40,17 +42,40 @@ export default function ScanScreen() {
     setReading(true);
     setReadResult(null);
     try {
-      const hints = await api.ocr(dataUri);
+      const hints = await api.ocr(dataUri, category);
       let filled = 0;
       if (hints.name && !name.trim()) { setCardName(hints.name); filled++; }
       if (hints.card_number && !cardNumber.trim()) { setCardNumber(hints.card_number); filled++; }
-      const available = [hints.name, hints.card_number].filter(Boolean).length;
-      setReadResult(available === 0 ? 'nothing' : filled === 0 ? 'nothing' : available === 2 ? 'filled' : 'partial');
+      if (hints.team && !team.trim()) { setTeam(hints.team); filled++; }
+      if (hints.year && !year.trim()) { setYear(String(hints.year)); filled++; }
+      const available = [hints.name, hints.card_number, hints.team, hints.year].filter(Boolean).length;
+      setReadResult(available === 0 || filled === 0 ? 'nothing' : filled >= 2 ? 'filled' : 'partial');
     } catch {
       // Not fatal — the fields are still there to type into.
       setReadResult('failed');
     } finally {
       setReading(false);
+    }
+  }
+
+  // Sports has no catalog to match against, so there's no candidate step —
+  // what the user confirms in the fields is the card.
+  const [savingSports, setSavingSports] = useState(false);
+  async function saveSportsCard() {
+    setSavingSports(true);
+    try {
+      await save({
+        category: 'sports',
+        // `name` is required on the row; for a sports card that's the player.
+        name: name.trim(),
+        player: name.trim() || null,
+        team: team.trim() || null,
+        year: year.trim() ? Number(year.trim()) : null,
+        set_name: setName.trim() || null,
+        card_number: cardNumber.trim() || null,
+      });
+    } finally {
+      setSavingSports(false);
     }
   }
 
@@ -192,18 +217,40 @@ export default function ScanScreen() {
           )}
 
           {stage.kind === 'input' && category === 'sports' && (
-            <ThemedView type="backgroundElement" style={styles.comingSoon}>
-              <ThemedText type="defaultSemiBold">Sports scan — coming soon</ThemedText>
-              <ThemedText type="small" style={{ opacity: 0.75 }}>
-                Sports card recognition isn&apos;t wired up yet. Unlike Pokémon
-                (which has a clean free API), sports pricing needs a data
-                source decision — eBay sold-listings, Card Ladder, or
-                SportsCardsPro — each with real tradeoffs.
+            <>
+              <ThemedText type="small" style={{ opacity: 0.7 }}>
+                Photograph the card and check what we read off it. Sports cards
+                are saved straight to your collection — there&apos;s no catalog to
+                match against yet.
               </ThemedText>
-              <ThemedText type="small" style={{ opacity: 0.75 }}>
-                Switch back to Pokémon above to try the scan flow.
-              </ThemedText>
-            </ThemedView>
+              <Field label="Player *" value={name} onChangeText={setCardName} placeholder="Sandy Koufax" />
+              <Field label="Team" value={team} onChangeText={setTeam} placeholder="Brooklyn Dodgers" />
+              <Field label="Year" value={year} onChangeText={setYear} placeholder="1955" keyboardType="number-pad" />
+              <Field label="Set / brand" value={setName} onChangeText={setSet} placeholder="Topps" />
+              <Field label="Card number" value={cardNumber} onChangeText={setCardNumber} placeholder="123" />
+
+              {/* Said plainly rather than buried: the card saves and tracks,
+                  it just won't carry a market value until a sports price
+                  source is picked. */}
+              <ThemedView type="backgroundElement" style={styles.comingSoon}>
+                <ThemedText type="small" style={{ opacity: 0.8 }}>
+                  Sports cards save with no market value for now — automatic
+                  pricing needs a data source that hasn&apos;t been chosen yet. Cost
+                  basis, photos, listings and portfolio all work in the meantime.
+                </ThemedText>
+              </ThemedView>
+
+              {error && <ThemedText style={styles.error}>{error}</ThemedText>}
+
+              <Pressable
+                onPress={saveSportsCard}
+                disabled={!name.trim() || savingSports}
+                style={[styles.button, styles.primary, (!name.trim() || savingSports) && { opacity: 0.4 }]}>
+                <ThemedText type="defaultSemiBold" style={{ color: 'white' }}>
+                  {savingSports ? 'Saving…' : 'Save to collection'}
+                </ThemedText>
+              </Pressable>
+            </>
           )}
 
           {stage.kind === 'input' && category === 'pokemon' && (

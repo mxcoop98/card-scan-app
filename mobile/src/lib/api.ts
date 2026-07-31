@@ -33,6 +33,10 @@ export type CardSide = 'front' | 'back';
 export type OcrHints = {
   name: string | null;
   card_number: string | null;
+  /** Sports only — read from the printed team, when one is recognised. */
+  team?: string | null;
+  /** Sports only. */
+  year?: number | null;
   /** Always null — Pokémon sets are a printed symbol, not readable text. */
   set_name: string | null;
   confidence: number;
@@ -338,8 +342,8 @@ export const api = {
   // Read a card photo for search hints. Any field may come back null when
   // the read wasn't confident — that's deliberate, since a wrong value is
   // worse than an empty box the user was going to fill anyway.
-  ocr: (image: string) =>
-    req<OcrHints>('/api/ocr', { method: 'POST', body: JSON.stringify({ image }) }),
+  ocr: (image: string, category: 'pokemon' | 'sports' = 'pokemon') =>
+    req<OcrHints>('/api/ocr', { method: 'POST', body: JSON.stringify({ image, category }) }),
   variants: (params: {
     category: 'pokemon' | 'sports';
     name: string;

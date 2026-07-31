@@ -238,6 +238,149 @@ export function cleanName(raw) {
   return s;
 }
 
+// Team nicknames, not cities: the nickname is the distinctive token and it
+// survives OCR better than a two-word city. Includes defunct/relocated
+// names because those are exactly the cards worth scanning.
+const TEAM_NICKNAMES = new Set(
+  `angels astros athletics bluejays braves brewers cardinals cubs diamondbacks dodgers giants
+   guardians indians mariners marlins mets nationals orioles padres phillies pirates rangers rays
+   reds redsox rockies royals tigers twins whitesox yankees expos senators
+   bucks bulls cavaliers celtics clippers grizzlies hawks heat hornets jazz kings knicks lakers
+   magic mavericks nets nuggets pacers pelicans pistons raptors rockets sixers spurs
+   suns thunder timberwolves trailblazers warriors wizards supersonics bullets
+   bears bengals bills broncos browns buccaneers cardinals chargers chiefs colts commanders
+   cowboys dolphins eagles falcons jaguars jets lions packers panthers patriots raiders rams
+   ravens saints seahawks steelers texans titans vikings oilers redskins
+   avalanche blackhawks bluejackets blues bruins canadiens canucks capitals coyotes devils
+   ducks flames flyers goldenknights hurricanes islanders jets kraken lightning maple leafs
+   oilers panthers penguins predators rangers sabres senators sharks stars wild`
+    .split(/\s+/).filter(Boolean)
+);
+
+// Positions are printed next to the name and are never part of it.
+const POSITIONS = new Set(
+  `pitcher catcher infield outfield shortstop first second third base baseman designated hitter
+   quarterback runningback fullback halfback receiver tightend tackle guard center linebacker
+   cornerback safety kicker punter defensive offensive lineman back end
+   forward guard center point shooting power small
+   goalie goaltender defenseman wing winger centre`
+    .split(/\s+/).filter(Boolean)
+);
+
+// City/franchise locations. Needed twice over: to attach the city to a
+// matched nickname, and to keep a bare city off the player field — OCR
+// reading "PITTSBURG" off a Wagner card is a location, not a person.
+const TEAM_CITIES = new Set(
+  `anaheim arizona atlanta baltimore boston brooklyn buffalo calgary carolina charlotte chicago
+   cincinnati cleveland colorado columbus dallas denver detroit edmonton florida georgia golden
+   green houston indiana indianapolis jacksonville kansas lasvegas losangeles memphis miami
+   milwaukee minnesota minneapolis montreal nashville newengland neworleans newyork oakland
+   oklahoma orlando ottawa philadelphia phoenix pittsburgh pittsburg portland quebec sacramento
+   sandiego sanfrancisco sanjose seattle stlouis tampa tennessee texas toronto utah vancouver
+   washington winnipeg`
+    .split(/\s+/).filter(Boolean)
+);
+
+const norm = (s) => s.toLowerCase().replace(/[^a-z]/g, '');
+
+/**
+ * Sports-card hints. A different problem from Pokémon, and the earlier
+ * heuristics get it exactly wrong:
+ *
+ *  - The name is not at the top. On a 1955 Topps Koufax it sits at 92% of
+ *    the card height, and the card is landscape.
+ *  - Player and team are printed together in similar-sized type
+ *    ("SANDY KOUFAX / BROOKLYN DODGERS"), so size can't separate them.
+ *
+ * What does work is the same confidence floor as Pokémon, plus a
+ * dictionary: team nicknames and positions are closed sets, so whatever
+ * high-confidence text is left over is the player.
+ */
+export function extractSportsHints(ocr) {
+  const words = ocr.words
+    .filter((w) => w.bbox && w.text?.trim())
+    .map((w) => ({
+      text: w.text.trim().replace(/[“”"']/g, ''),
+      confidence: w.confidence ?? 0,
+      y: (w.bbox.y0 + w.bbox.y1) / 2,
+      x: w.bbox.x0,
+      h: w.bbox.y1 - w.bbox.y0,
+    }))
+    .filter((w) => w.confidence >= MIN_WORD_CONFIDENCE);
+
+  const text = ocr.text || '';
+
+  // --- team ---
+  let team = null;
+  const teamWords = new Set();
+  const teamWord = words.find((w) => TEAM_NICKNAMES.has(norm(w.text)));
+  if (teamWord) {
+    teamWords.add(teamWord);
+    // Pull in an adjacent city word on the same line to the left.
+    const sameLine = words
+      .filter((w) => Math.abs(w.y - teamWord.y) < teamWord.h * 0.8)
+      .sort((a, b) => a.x - b.x);
+    const idx = sameLine.indexOf(teamWord);
+    const city = idx > 0 ? sameLine[idx - 1] : null;
+    const cityOk = city && TEAM_CITIES.has(norm(city.text));
+    if (cityOk) teamWords.add(city);
+    team = cleanName(cityOk ? `${city.text} ${teamWord.text}` : teamWord.text);
+  }
+
+  // --- player ---
+  // Everything word-shaped that isn't part of the team, a position, a
+  // location, or a brand. Excluding the words the team already claimed is
+  // what stops "SANDY KOUFAX BROOKLYN" coming back as the player.
+  const nameish = words.filter(
+    (w) =>
+      /^[A-Za-z][A-Za-z.'’\-]{1,}$/.test(w.text) &&
+      !teamWords.has(w) &&
+      !TEAM_NICKNAMES.has(norm(w.text)) &&
+      !TEAM_CITIES.has(norm(w.text)) &&
+      !POSITIONS.has(norm(w.text)) &&
+      !/^(topps|panini|bowman|donruss|fleer|upper|deck|score|rookie|card|series)$/i.test(w.text)
+  );
+  let player = null;
+  if (nameish.length) {
+    // Group by line, then take the line with the strongest combined
+    // confidence — the printed name reads far more cleanly than artwork.
+    const lines = [];
+    for (const w of nameish.sort((a, b) => a.y - b.y)) {
+      const line = lines.find((l) => Math.abs(l.y - w.y) < Math.max(l.h, w.h) * 0.8);
+      if (line) { line.words.push(w); line.y = (line.y + w.y) / 2; line.h = Math.max(line.h, w.h); }
+      else lines.push({ words: [w], y: w.y, h: w.h });
+    }
+    const scored = lines
+      .map((l) => ({
+        text: l.words.sort((a, b) => a.x - b.x).map((w) => w.text).join(' '),
+        score: l.words.reduce((s, w) => s + w.confidence, 0),
+        n: l.words.length,
+      }))
+      // A name is one to four words; longer lines are stat or copyright text.
+      .filter((l) => l.n >= 1 && l.n <= 4)
+      .sort((a, b) => b.score - a.score);
+    player = scored.length ? cleanName(scored[0].text) : null;
+  }
+
+  // --- year and number ---
+  const yearMatch = text.match(/\b(19[3-9]\d|20[0-4]\d)\b/);
+  const year = yearMatch ? Number(yearMatch[1]) : null;
+  const card_number =
+    matchCardNumber(text) ?? (text.match(/#\s*(\d{1,4})\b/) ? `#${text.match(/#\s*(\d{1,4})\b/)[1]}` : null);
+
+  const found = [player, team, card_number].filter(Boolean).length;
+  return {
+    name: player,
+    player,
+    team,
+    year,
+    card_number,
+    set_name: null,
+    confidence: found === 0 ? 0 : Math.min(0.9, found / 3),
+    text,
+  };
+}
+
 /**
  * Derive search hints from OCR output.
  *
@@ -285,13 +428,23 @@ export function extractHints(ocr, imageHeight) {
   };
 }
 
-/** Run OCR over an image buffer and return hints plus the raw reading. */
-export async function readCardHints(buffer) {
+/**
+ * Run OCR over an image buffer and return hints plus the raw reading.
+ * `category` selects the layout rules — Pokémon and sports cards put their
+ * text in different places and need different extraction.
+ */
+export async function readCardHints(buffer, category = 'pokemon') {
   const size = imageSize(buffer);
   let lastError;
   for (const provider of PROVIDERS) {
     try {
       const ocr = await provider(buffer);
+      if (category === 'sports') {
+        const hints = extractSportsHints(ocr);
+        // Sports numbers are usually on the back, so a bottom-strip retry
+        // on the front rarely helps and just costs a second pass.
+        return { ...hints, provider: ocr.provider };
+      }
       const hints = extractHints(ocr, size?.height);
 
       // Only pay for the second pass when the first didn't find a number.
