@@ -7,7 +7,7 @@
 // which opens the rear camera on a phone and a file dialog on desktop.
 
 import { Image } from 'expo-image';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, StyleSheet, View } from 'react-native';
 
 import { LIVE_CAMERA_SUPPORTED, LiveCamera } from '@/components/live-camera';
@@ -22,6 +22,18 @@ export const CARD_ASPECT = 5 / 7;
 // and guessing blind is how you end up with a shutter that never fires.
 // Set EXPO_PUBLIC_DEBUG_AUTOCAPTURE=1 to turn it on.
 const DEBUG_AUTOCAPTURE = process.env.EXPO_PUBLIC_DEBUG_AUTOCAPTURE === '1';
+
+// Whether to offer the live viewfinder. Resolved after mount, never during
+// render: the web build is prerendered to static HTML with no `navigator`,
+// so reading camera support at render time makes the server markup (one
+// button) disagree with the client's (two), which is a hydration mismatch.
+// Starting false and upgrading keeps the first client render identical to
+// the prerendered HTML.
+function useLiveCameraAvailable() {
+  const [available, setAvailable] = useState(false);
+  useEffect(() => setAvailable(LIVE_CAMERA_SUPPORTED), []);
+  return available;
+}
 
 type CaptureProps = {
   onCapture: (dataUri: string) => void;
@@ -137,6 +149,7 @@ export function PhotoSlot({
   width?: number;
 }) {
   const [aiming, setAiming] = useState(false);
+  const liveCamera = useLiveCameraAvailable();
 
   // While the viewfinder is open it replaces the still frame entirely —
   // showing both a live preview and a placeholder frame reads as two
@@ -170,7 +183,7 @@ export function PhotoSlot({
         )}
       </ThemedView>
 
-      {LIVE_CAMERA_SUPPORTED ? (
+      {liveCamera ? (
         <>
           <Pressable onPress={() => setAiming(true)} style={[styles.button, !uri && styles.primary]}>
             <ThemedText type="defaultSemiBold" style={!uri ? { color: 'white' } : undefined}>
