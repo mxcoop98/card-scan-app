@@ -3,6 +3,7 @@
   "buildCommand": "npx expo export -p web",
   "outputDirectory": "dist",
   "installCommand": "npm install",
+  "cleanUrls": true,
   "rewrites": [
     { "source": "/((?!_expo|assets|favicon\\.ico|robots\\.txt).*)", "destination": "/index.html" }
   ]
