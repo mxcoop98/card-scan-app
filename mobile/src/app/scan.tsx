@@ -207,7 +207,7 @@ export default function ScanScreen() {
               {reading
                 ? 'Reading the card…'
                 : readResult === 'filled'
-                  ? '✓ Filled in from your photo — check it before searching.'
+                  ? `✓ Filled in from your photo — check it before ${category === 'sports' ? 'saving' : 'searching'}.`
                   : readResult === 'partial'
                     ? '✓ Read part of the card — fill in the rest if you can.'
                     : readResult === 'nothing'
