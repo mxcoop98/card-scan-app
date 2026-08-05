@@ -520,9 +520,9 @@ only the canonical production URL is fully public.
    onboarding + getting the prod keyset re-enabled (marketplace-deletion
    compliance), more polished title / aspect logic per category. The RuName
    redirect fix is **done** — see gotcha #6.
-3. **Sports pricing** — no clean official API. Candidates: eBay sold-listings,
-   Card Ladder, SportsCardsPro, PSA Auction Prices Realized. Do NOT hallucinate
-   one — present tradeoffs.
+3. **Sports pricing** — researched, still undecided; every source has a cost or
+   licensing blocker. See "Sports pricing — the decision" above. Do NOT pick one
+   unilaterally. Sports cards otherwise work end to end.
 4. **Sports variant discovery** — the `/api/variants` endpoint returns empty for
    sports because we don't have a sports card DB. Same fix as sports pricing.
 5. **PSA API for grading** — auto-populate graded price estimates + Pop Report
@@ -580,6 +580,32 @@ Worth knowing about deployment: tesseract.js pulls `eng.traineddata` from a CDN
 on first use in a fresh container, so the first scan after a deploy is slower.
 If that fetch fails the endpoint returns 503 and the scan screen tells the user
 to type the fields instead — OCR failing never blocks adding a card.
+
+## Sports pricing — the decision, and why it's still open
+
+Sports cards **scan, read, save and track** as of 2026-08-03. What they don't
+have is a market value, because every price source has a blocker. Researched
+2026-08-03 — re-verify before acting, this landscape moves:
+
+| Source | Cost | Blocker |
+|---|---|---|
+| eBay Marketplace Insights (real sold comps) | — | **Limited Release**; non-partners routinely denied. Our `sell.*` OAuth does not help — this is not a missing scope. |
+| eBay Browse (active listings) | free | *Asking* prices, not sold, so it overstates value. Also needs the prod keyset re-enabled, already a separate blocker. |
+| SportsCardsPro (PriceCharting) | $49/mo | **ToS forbids use in "any software, application, or system that is accessible to third parties"** without express permission. Internal use only → unusable in a public app. Current values only, no history. |
+| CardHedge | **unknown**, sales-led | Sports **and** Pokémon, price history, pop reports, plus AI photo identification. Targets startups shipping products, so the licensing posture fits. |
+| Zyla API Hub listing | $49.99/mo | Only **2,000 requests/month**, then ~$0.032 each. Opaque underlying source. The daily refresh cron blows that quota at modest collection sizes. |
+| Card Ladder | — | No public API; scraping only. |
+
+**Next action:** `CARDHEDGE_ENQUIRY.md` holds a drafted enquiry, unsent, needing
+two volume numbers. CardHedge is worth asking because it could close sports
+pricing + sports identification + Pokémon identification + pop data in one
+integration. If their answer to the licensing question matches SportsCardsPro's,
+the shortlist is empty and the fallback is **manual value entry** — let the user
+type a value per sports card, which costs nothing, carries no licensing risk,
+and makes portfolio/P&L work immediately.
+
+Watch the quota arithmetic on anything metered: `refresh-all.js` makes one call
+per card per day, so monthly calls ≈ collection size × 30.
 
 ## Gotchas we've hit (so you don't waste a session on them)
 
